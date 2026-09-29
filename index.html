@@ -615,15 +615,31 @@
 
   /* =================== manage users modal =================== */
   .it-modal-backdrop#itManageUsersBackdrop[hidden]{display:none;}
+  /* wider than the base .it-modal-panel (560px) - this is a 5-column table
+     of controls, not a form, and 560px is too cramped to fit it without
+     everything overlapping or scrolling sideways. */
+  .it-manage-users-panel{max-width:680px;}
   .it-mu-list{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;}
-  .it-mu-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
+  /* a fixed-width grid (not flexbox) so every row's columns line up exactly,
+     regardless of how many controls that particular row has - the master
+     row only has 2 children (email + a disabled select) while a normal row
+     has 5 (email, role, project, save, delete); flexbox would let the
+     shorter row's items pack differently and drift out of alignment, but
+     with fixed column tracks a short row just leaves its trailing columns
+     empty instead of shifting anything. */
+  .it-mu-row{display:grid;grid-template-columns:minmax(130px,1fr) 150px 130px 55px 90px;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
   .it-mu-row:last-child{border-bottom:none;}
-  .it-mu-email{flex:1 1 200px;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .it-mu-email{min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .it-mu-master-badge{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:99px;background:var(--navy);color:#fff;vertical-align:middle;}
-  .it-mu-row select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);}
-  .it-mu-row button{padding:6px 11px;font-size:12.5px;}
+  .it-mu-row select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;}
+  .it-mu-row button{padding:6px 11px;font-size:12.5px;width:100%;white-space:nowrap;}
   .it-mu-row .it-mu-save{visibility:hidden;}
   .it-mu-row.it-mu-dirty .it-mu-save{visibility:visible;}
+
+  @media (max-width:640px){
+    .it-mu-row{grid-template-columns:1fr;row-gap:6px;}
+    .it-mu-row select, .it-mu-row button{width:auto;}
+  }
   .it-mu-msg{font-size:13px;color:var(--text-muted);min-height:18px;margin-bottom:6px;}
   .it-mu-msg.bad{color:var(--danger);font-weight:600;}
   .it-mu-msg.good{color:var(--good);font-weight:600;}
@@ -775,7 +791,7 @@
   </div>
 </div>
 <div class="it-modal-backdrop" id="itManageUsersBackdrop" hidden="">
-  <div class="it-modal-panel" role="dialog" aria-modal="true" aria-labelledby="itManageUsersTitle">
+  <div class="it-modal-panel it-manage-users-panel" role="dialog" aria-modal="true" aria-labelledby="itManageUsersTitle">
     <div class="it-modal-head">
       <h2 id="itManageUsersTitle">Manage users</h2>
       <button class="it-icon-btn" id="itManageUsersClose" title="Close" aria-label="Close" type="button">
@@ -4064,6 +4080,10 @@
     });
   }
 
+  // no-op until it-roles.js turns it into a real email (see notify-new-project.ts) -
+  // the app behaves exactly as before when that layer isn't built in
+  var notifyNewProjectCreated = function(){};
+
   function itCreateProject(name, seedItems){
     name = String(name || "").trim();
     if (!name){ itProjectMsg("Type a project name first.", true); return Promise.resolve(); }
@@ -4071,6 +4091,7 @@
     var meta = {projectName: name, dataSourceNote: ""};
     return itc.sb.from("it_projects").insert({name: name, meta: meta, updated_by: itc.clientId}).select().single().then(function(r){
       if (r.error) throw r.error;
+      notifyNewProjectCreated(r.data);
       return itOpenProject(r.data).then(function(){
         if (seedItems && seedItems.length){
           loadDataset(seedItems, name);
@@ -4361,6 +4382,16 @@
       });
     });
   }
+
+  // ---------- new-project email ----------
+  // Fires once, right after a brand-new project is created (see
+  // itCreateProject) - tells operations a new project has been loaded into
+  // the tracker. Never fires for merely OPENING an existing project, only
+  // for creating one.
+  notifyNewProjectCreated = function(project){
+    if (!project || !project.id) return;
+    itInvokeFn("notify-new-project", {projectId: project.id}).catch(function(e){ console.warn("new-project email failed", e); });
+  };
 
   // ---------- manage users (staff only) ----------
   // "Role" in the UI is one of 3 kinds; the database only knows role +
