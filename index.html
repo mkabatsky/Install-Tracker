@@ -574,6 +574,72 @@
   @media (max-width:640px){
     .it-modal-panel{max-width:none;width:100%;max-height:100%;height:100%;border-radius:0;}
   }
+
+  /* =================== roles: viewer (read-only) =================== */
+  /* The real enforcement is server-side (RLS) and cloudNotify* being turned
+     into no-ops for this role (see it-roles.js) - this CSS just keeps the
+     screen from offering controls that would otherwise silently do nothing
+     or fail. */
+  #itRoleBanner{display:none;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:5px 10px;border-radius:8px;background:var(--surface-2);color:var(--text-muted);}
+  body.it-role-viewer #itRoleBanner{display:inline-flex;}
+
+  /* only hide the Projects picker button when this account is pinned to one
+     project - an unlocked viewer can still browse and switch between
+     projects, same as staff, just read-only once inside one */
+  body.it-locked-project #itProjectsBtn{display:none !important;}
+
+  /* an unlocked viewer can open the Projects list (to browse/switch) but
+     creating a project or deleting one there is still a write action */
+  body.it-role-viewer #itNewName, body.it-role-viewer #itNewBtn{display:none !important;}
+  body.it-role-viewer .it-project-row button:not(.it-primary){display:none !important;}
+
+  /* top-toolbar actions that write data - BOM import and Load both replace
+     the whole item list. Export/PDF/Expand-all are read-only and stay. */
+  body.it-role-viewer #bomBtn, body.it-role-viewer #loadBtn{display:none !important;}
+  body.it-role-viewer #itManageUsersBtn{display:none !important;}
+
+  /* everything inside the floor/room tree that lets you change data: the
+     in-scope checkbox, status/cable dropdowns, and notes text, plus the
+     floor/room "mark installed" buttons */
+  body.it-role-viewer #floorList input,
+  body.it-role-viewer #floorList select,
+  body.it-role-viewer #floorList textarea,
+  body.it-role-viewer #floorList [data-action]{
+    pointer-events:none;
+  }
+  body.it-role-viewer #floorList .note-toggle,
+  body.it-role-viewer #floorList .floor-actions,
+  body.it-role-viewer #floorList .room-actions{
+    display:none;
+  }
+
+  /* =================== manage users modal =================== */
+  .it-modal-backdrop#itManageUsersBackdrop[hidden]{display:none;}
+  .it-mu-list{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;}
+  .it-mu-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
+  .it-mu-row:last-child{border-bottom:none;}
+  .it-mu-email{flex:1 1 200px;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .it-mu-master-badge{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:99px;background:var(--navy);color:#fff;vertical-align:middle;}
+  .it-mu-row select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);}
+  .it-mu-row button{padding:6px 11px;font-size:12.5px;}
+  .it-mu-row .it-mu-save{visibility:hidden;}
+  .it-mu-row.it-mu-dirty .it-mu-save{visibility:visible;}
+  .it-mu-msg{font-size:13px;color:var(--text-muted);min-height:18px;margin-bottom:6px;}
+  .it-mu-msg.bad{color:var(--danger);font-weight:600;}
+  .it-mu-msg.good{color:var(--good);font-weight:600;}
+  .it-mu-new{border-top:1px solid var(--border);padding-top:12px;margin-top:4px;}
+  .it-mu-new h3{margin:0 0 10px;font-size:14px;}
+  .it-mu-new-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px;}
+  .it-mu-new-fields label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--text-muted);}
+  /* 16px so focusing these on iPhone Safari doesn't auto-zoom the page,
+     same reasoning as the Equipment Database's equivalent forms. */
+  .it-mu-new-fields input, .it-mu-new-fields select{font:inherit;font-size:16px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);}
+  .it-mu-new-fields label.it-mu-new-project{display:none;}
+  .it-mu-new-fields label.it-mu-new-project.show{display:flex;}
+
+  @media (max-width:640px){
+    .it-mu-new-fields{grid-template-columns:1fr;}
+  }
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1c2331">
@@ -595,7 +661,9 @@
       <div class="it-cloud-bar">
         <span id="itSyncDot"></span>
         <span id="itSyncLabel">Starting…</span>
+        <span id="itRoleBanner"></span>
         <span class="it-cloud-user" id="itCloudUser"></span>
+        <button class="tool-btn" id="itManageUsersBtn" type="button">Manage users</button>
         <button class="tool-btn" id="itProjectsBtn" type="button">Projects</button>
         <button class="tool-btn" id="itSignOutBtn" type="button">Sign out</button>
       </div>
@@ -704,6 +772,38 @@
     </div>
     <div class="it-project-list" id="itProjectList"></div>
     <div class="it-project-msg" id="itProjectMsg" aria-live="polite"></div>
+  </div>
+</div>
+<div class="it-modal-backdrop" id="itManageUsersBackdrop" hidden="">
+  <div class="it-modal-panel" role="dialog" aria-modal="true" aria-labelledby="itManageUsersTitle">
+    <div class="it-modal-head">
+      <h2 id="itManageUsersTitle">Manage users</h2>
+      <button class="it-icon-btn" id="itManageUsersClose" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <p class="it-modal-sub">Full-access staff only. A new login can sign in right away with the password you set below.</p>
+
+    <div class="it-mu-list" id="itMuList"></div>
+    <div class="it-mu-msg" id="itMuMsg" aria-live="polite"></div>
+
+    <div class="it-mu-new">
+      <h3>Add a user</h3>
+      <div class="it-mu-new-fields">
+        <label>Email<input type="email" id="itMuNewEmail" autocomplete="off"></label>
+        <label>Password<input type="text" id="itMuNewPassword" autocomplete="off" placeholder="at least 6 characters"></label>
+        <label>Name (optional)<input type="text" id="itMuNewName" autocomplete="off"></label>
+        <label>Role
+          <select id="itMuNewRole">
+            <option value="staff">Staff (full access)</option>
+            <option value="viewer-locked">Viewer - one project</option>
+            <option value="viewer-any">Viewer - all projects</option>
+          </select>
+        </label>
+        <label class="it-mu-new-project" id="itMuNewProjectWrap">Project<select id="itMuNewProject"></select></label>
+      </div>
+      <button class="it-primary" id="itMuCreateBtn" type="button">Create user</button>
+    </div>
   </div>
 </div>
 <div id="printArea"></div>
@@ -3367,6 +3467,7 @@
   var ITCLOUD = (window.ITDB_CLOUD && /^https?:\/\//.test(String(window.ITDB_CLOUD.url || "")) && window.ITDB_CLOUD.anonKey && !/^PASTE/.test(String(window.ITDB_CLOUD.anonKey))) ? window.ITDB_CLOUD : null;
   var itc = {
     on: false, sb: null, user: null, projectId: null, projectName: "", channel: null,
+    role: "staff", readOnly: false, // set by it-roles.js once the signed-in account's role is known
     syncedItems: new Map(),   // id -> {json, pos, ts}: what the server last confirmed
     syncedCable: new Map(),   // roomKey -> {json, ts}
     metaBase: {},             // {projectName, dataSourceNote} the server last confirmed
@@ -4101,25 +4202,25 @@
 
   // ----- hooks the main app calls (overridden here once cloud mode is on) -----
   function itNotifyItemChanged(id){
-    if (!itc.projectId) return;
+    if (!itc.projectId || itc.readOnly) return;
     itIsDirty = true;
     itStatus("busy", "Saving...");
     itSchedulePush();
   }
   function itNotifyCableChanged(roomKey){
-    if (!itc.projectId) return;
+    if (!itc.projectId || itc.readOnly) return;
     itIsDirty = true;
     itStatus("busy", "Saving...");
     itSchedulePush();
   }
   function itNotifyProjectMetaChanged(){
-    if (!itc.projectId) return;
+    if (!itc.projectId || itc.readOnly) return;
     itIsDirty = true;
     itStatus("busy", "Saving...");
     itSchedulePush();
   }
   function itNotifyBulkItemsReplaced(){
-    if (!itc.projectId) return;
+    if (!itc.projectId || itc.readOnly) return;
     // a fresh BOM import replaced the whole list. Leave itc.syncedItems as
     // it is (don't wipe it!) - itPushNow's normal diff already treats every
     // item that isn't in there as new, AND marks anything that WAS synced
@@ -4187,6 +4288,282 @@
       itShowLogin("Couldn't start sync: " + (e && e.message ? e.message : e));
     });
   }
+
+  // ---------- roles: viewer (read-only, optionally locked to one project) ----------
+  // Same idea as the Equipment Database's viewer role: the real security
+  // boundary is server-side RLS (see supabase-setup-it-roles.sql) - this
+  // file just keeps the screen from offering controls that would otherwise
+  // silently do nothing or fail.
+
+  // `locked` = true when this account is pinned to one specific project (the
+  // Projects button/picker makes no sense then, since there's nothing else
+  // to switch to). A viewer with no project assigned is NOT locked - they
+  // behave like staff for navigation (pick any project) but read-only once
+  // inside one.
+  function itApplyRoleUi(role, locked){
+    document.body.classList.remove("it-role-viewer", "it-locked-project");
+    itc.readOnly = role === "viewer";
+    if (role === "viewer"){
+      document.body.classList.add("it-role-viewer");
+      if (locked) document.body.classList.add("it-locked-project");
+    }
+    var banner = itEl("itRoleBanner");
+    if (banner){
+      banner.textContent = role === "viewer" ? (locked ? "Viewer — read only" : "Viewer — read only (all projects)") : "";
+    }
+  }
+
+  var itLegacyResume = itResume;
+  function itRolesResume(){
+    return itc.sb.from("it_profiles").select("role,project_id").eq("id", itc.user.id).maybeSingle().then(function(pr){
+      var role = (pr.data && pr.data.role) || "staff";
+      var projectId = pr.data && pr.data.project_id;
+      itc.role = role;
+
+      if (role === "viewer" && !projectId){
+        // read-only, but can browse/open any project - same navigation as staff
+        itApplyRoleUi(role, false);
+        return itLegacyResume();
+      }
+      if (role === "viewer" && projectId){
+        itApplyRoleUi(role, true);
+        return itc.sb.from("it_projects").select("id,name,meta").eq("id", projectId).maybeSingle().then(function(jr){
+          if (jr.error || !jr.data){
+            itStatus("bad", "Your assigned project wasn't found — contact your administrator.");
+            return;
+          }
+          return itOpenProject(jr.data);
+        });
+      }
+      itApplyRoleUi("staff");
+      return itLegacyResume();
+    }).catch(function(){
+      // it_profiles missing/unreachable (e.g. offline, or the SQL migration
+      // for this feature hasn't been run yet) - fall back to normal
+      // full-access behavior so nothing breaks for existing accounts
+      itApplyRoleUi("staff");
+      return itLegacyResume();
+    });
+  }
+  itResume = itRolesResume;
+
+  // Explicitly attaches the signed-in user's token to a function call rather
+  // than counting on the client library to do it - functions.invoke() is
+  // supposed to attach it automatically, but doesn't reliably in every
+  // project/library-version combination, and the Edge Function can't tell
+  // who's calling without it.
+  function itInvokeFn(name, body){
+    return itc.sb.auth.getSession().then(function(sessRes){
+      var token = sessRes && sessRes.data && sessRes.data.session && sessRes.data.session.access_token;
+      return itc.sb.functions.invoke(name, {
+        headers: token ? {Authorization: "Bearer " + token} : undefined,
+        body: body
+      });
+    });
+  }
+
+  // ---------- manage users (staff only) ----------
+  // "Role" in the UI is one of 3 kinds; the database only knows role +
+  // project_id, so viewer-locked/viewer-any are both stored as
+  // role="viewer", told apart by whether project_id is set.
+  var itMuProjects = []; // [{id, name}], refreshed each time the list loads
+  var itMuUsers = [];
+
+  function itMuKind(u){
+    if (u.role === "viewer") return u.projectId ? "viewer-locked" : "viewer-any";
+    return "staff";
+  }
+  function itMuKindNeedsProject(kind){ return kind === "viewer-locked"; }
+  function itMuRoleAndProject(kind, projectId){
+    if (kind === "viewer-locked") return {role: "viewer", projectId: projectId || null};
+    if (kind === "viewer-any") return {role: "viewer", projectId: null};
+    return {role: "staff", projectId: null};
+  }
+  function itMuProjectOptionsHtml(selectedId){
+    return '<option value="">Pick a project...</option>' + itMuProjects.map(function(p){
+      return '<option value="' + p.id + '"' + (p.id === selectedId ? " selected" : "") + '>' + escapeHtml(p.name || "Untitled project") + '</option>';
+    }).join("");
+  }
+
+  function itMuMsg(text, kind){
+    var m = itEl("itMuMsg");
+    m.textContent = text || "";
+    m.className = "it-mu-msg" + (kind ? " " + kind : "");
+  }
+
+  function itRenderMuList(){
+    var list = itEl("itMuList");
+    list.innerHTML = itMuUsers.map(function(u){
+      // the master account: no role select, no project select, no
+      // Save/Delete - there's nothing here that can actually be changed
+      // (the real enforcement is server-side in it-admin-users either way,
+      // this just keeps the screen from offering controls that would only
+      // fail).
+      if (u.isMaster){
+        return (
+          '<div class="it-mu-row" data-id="' + u.id + '">' +
+            '<span class="it-mu-email">' + escapeHtml(u.email) +
+              ' <span class="it-mu-master-badge" title="The master account - can\'t be deleted or have its role changed, by anyone.">Master</span>' +
+            '</span>' +
+            '<select class="it-mu-role" disabled><option selected>Staff (full access)</option></select>' +
+          '</div>'
+        );
+      }
+      var kind = itMuKind(u);
+      var projShown = itMuKindNeedsProject(kind);
+      return (
+        '<div class="it-mu-row" data-id="' + u.id + '">' +
+          '<span class="it-mu-email">' + escapeHtml(u.email) + '</span>' +
+          '<select class="it-mu-role">' +
+            '<option value="staff"' + (kind === "staff" ? " selected" : "") + '>Staff (full access)</option>' +
+            '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project</option>' +
+            '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>Viewer - all projects</option>' +
+          '</select>' +
+          '<select class="it-mu-project" style="' + (projShown ? "" : "display:none") + '">' + itMuProjectOptionsHtml(u.projectId) + '</select>' +
+          '<button type="button" class="it-mu-save it-primary">Save</button>' +
+          '<button type="button" class="it-mu-delete">Delete login</button>' +
+        '</div>'
+      );
+    }).join("") || '<div class="it-mu-row">No users yet.</div>';
+  }
+
+  function itMuFindRowEls(rowEl){
+    return {
+      id: rowEl.getAttribute("data-id"),
+      roleSel: rowEl.querySelector(".it-mu-role"),
+      projectSel: rowEl.querySelector(".it-mu-project"),
+      saveBtn: rowEl.querySelector(".it-mu-save"),
+    };
+  }
+
+  function itLoadMuList(){
+    itMuMsg("Loading...");
+    return itInvokeFn("it-admin-users", {action: "list"}).then(function(res){
+      if (res.error){ itMuMsg("Couldn't load: " + res.error.message, "bad"); return; }
+      var data = res.data || {};
+      if (data.error){ itMuMsg("Couldn't load: " + data.error, "bad"); return; }
+      itMuUsers = data.users || [];
+      itMuProjects = data.projects || [];
+      itRenderMuList();
+      itEl("itMuNewProject").innerHTML = itMuProjectOptionsHtml("");
+      itMuMsg("");
+    }).catch(function(e){
+      itMuMsg("Couldn't load: " + (e && e.message ? e.message : e), "bad");
+    });
+  }
+
+  function itOpenManageUsersModal(){
+    itEl("itManageUsersBackdrop").hidden = false;
+    itEl("itMuNewEmail").value = "";
+    itEl("itMuNewPassword").value = "";
+    itEl("itMuNewName").value = "";
+    itEl("itMuNewRole").value = "staff";
+    itEl("itMuNewProjectWrap").classList.remove("show");
+    itLoadMuList();
+  }
+  function itCloseManageUsersModal(){ itEl("itManageUsersBackdrop").hidden = true; }
+
+  // Manage Users list: role dropdown toggles that row's project dropdown,
+  // and marks the row dirty (Save button becomes visible) until saved.
+  document.addEventListener("change", function(ev){
+    var rowEl = ev.target.closest && ev.target.closest(".it-mu-row[data-id]");
+    if (!rowEl) return;
+    if (ev.target.classList.contains("it-mu-role")){
+      var kind = ev.target.value;
+      var projSel = rowEl.querySelector(".it-mu-project");
+      projSel.style.display = itMuKindNeedsProject(kind) ? "" : "none";
+    }
+    if (ev.target.classList.contains("it-mu-role") || ev.target.classList.contains("it-mu-project")){
+      rowEl.classList.add("it-mu-dirty");
+    }
+  });
+
+  document.addEventListener("click", function(ev){
+    var saveBtn = ev.target.closest && ev.target.closest(".it-mu-row .it-mu-save");
+    if (saveBtn){
+      var rowEl = saveBtn.closest(".it-mu-row");
+      var f = itMuFindRowEls(rowEl);
+      var kind = f.roleSel.value;
+      var rp = itMuRoleAndProject(kind, f.projectSel.value);
+      if (itMuKindNeedsProject(kind) && !rp.projectId){ itMuMsg("Pick a project for that role first.", "bad"); return; }
+      saveBtn.disabled = true;
+      itMuMsg("Saving...");
+      itInvokeFn("it-admin-users", {action: "setRole", userId: f.id, role: rp.role, projectId: rp.projectId}).then(function(res){
+        saveBtn.disabled = false;
+        if (res.error){ itMuMsg("Couldn't save: " + res.error.message, "bad"); return; }
+        var data = res.data || {};
+        if (data.error){ itMuMsg("Couldn't save: " + data.error, "bad"); return; }
+        itMuMsg("Saved.", "good");
+        rowEl.classList.remove("it-mu-dirty");
+        itLoadMuList();
+      }).catch(function(e){
+        saveBtn.disabled = false;
+        itMuMsg("Couldn't save: " + (e && e.message ? e.message : e), "bad");
+      });
+      return;
+    }
+    var delBtn = ev.target.closest && ev.target.closest(".it-mu-row .it-mu-delete");
+    if (delBtn){
+      var rowEl2 = delBtn.closest(".it-mu-row");
+      var f2 = itMuFindRowEls(rowEl2);
+      var user = itMuUsers.filter(function(u){ return u.id === f2.id; })[0];
+      if (!confirm("Delete the login for " + (user ? user.email : "this user") + "? They will no longer be able to sign in at all.")) return;
+      delBtn.disabled = true;
+      itMuMsg("Deleting...");
+      itInvokeFn("it-admin-users", {action: "deleteUser", userId: f2.id}).then(function(res){
+        delBtn.disabled = false;
+        if (res.error){ itMuMsg("Couldn't delete: " + res.error.message, "bad"); return; }
+        var data = res.data || {};
+        if (data.error){ itMuMsg("Couldn't delete: " + data.error, "bad"); return; }
+        itMuMsg("Deleted.", "good");
+        itLoadMuList();
+      }).catch(function(e){
+        delBtn.disabled = false;
+        itMuMsg("Couldn't delete: " + (e && e.message ? e.message : e), "bad");
+      });
+    }
+  });
+
+  var itMuNewRoleEl = itEl("itMuNewRole");
+  if (itMuNewRoleEl) itMuNewRoleEl.addEventListener("change", function(){
+    itEl("itMuNewProjectWrap").classList.toggle("show", itMuKindNeedsProject(itMuNewRoleEl.value));
+  });
+
+  var itMuCreateBtnEl = itEl("itMuCreateBtn");
+  if (itMuCreateBtnEl) itMuCreateBtnEl.addEventListener("click", function(){
+    var email = itEl("itMuNewEmail").value.trim();
+    var password = itEl("itMuNewPassword").value;
+    var displayName = itEl("itMuNewName").value.trim();
+    var kind = itEl("itMuNewRole").value;
+    var rp = itMuRoleAndProject(kind, itEl("itMuNewProject").value);
+    if (!email){ itMuMsg("Enter an email address.", "bad"); return; }
+    if (!password || password.length < 6){ itMuMsg("Password needs to be at least 6 characters.", "bad"); return; }
+    if (itMuKindNeedsProject(kind) && !rp.projectId){ itMuMsg("Pick a project for that role first.", "bad"); return; }
+
+    itMuCreateBtnEl.disabled = true;
+    itMuMsg("Creating...");
+    itInvokeFn("it-admin-users", {action: "createUser", email: email, password: password, displayName: displayName, role: rp.role, projectId: rp.projectId}).then(function(res){
+      itMuCreateBtnEl.disabled = false;
+      if (res.error){ itMuMsg("Couldn't create: " + res.error.message, "bad"); return; }
+      var data = res.data || {};
+      if (data.error){ itMuMsg("Couldn't create: " + data.error, "bad"); return; }
+      itMuMsg("Created " + email + ".", "good");
+      itEl("itMuNewEmail").value = "";
+      itEl("itMuNewPassword").value = "";
+      itEl("itMuNewName").value = "";
+      itLoadMuList();
+    }).catch(function(e){
+      itMuCreateBtnEl.disabled = false;
+      itMuMsg("Couldn't create: " + (e && e.message ? e.message : e), "bad");
+    });
+  });
+
+  var itManageUsersBtnEl = itEl("itManageUsersBtn");
+  if (itManageUsersBtnEl) itManageUsersBtnEl.addEventListener("click", itOpenManageUsersModal);
+  var itManageUsersCloseEl = itEl("itManageUsersClose");
+  if (itManageUsersCloseEl) itManageUsersCloseEl.addEventListener("click", itCloseManageUsersModal);
+  var itManageUsersBackdropEl = itEl("itManageUsersBackdrop");
+  if (itManageUsersBackdropEl) itManageUsersBackdropEl.addEventListener("click", function(ev){ if (ev.target === itManageUsersBackdropEl) itCloseManageUsersModal(); });
 
   boot();
   itCloudBoot();
