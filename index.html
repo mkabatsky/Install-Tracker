@@ -627,12 +627,19 @@
      shorter row's items pack differently and drift out of alignment, but
      with fixed column tracks a short row just leaves its trailing columns
      empty instead of shifting anything. */
-  .it-mu-row{display:grid;grid-template-columns:minmax(130px,1fr) 150px 130px 55px 90px;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
+  .it-mu-row{display:grid;grid-template-columns:minmax(130px,1fr) 150px 112px 55px 108px;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
   .it-mu-row:last-child{border-bottom:none;}
-  .it-mu-email{min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* grid items default to min-width:auto, meaning a cell will refuse to
+     shrink below its content's own natural width (e.g. "Delete login" at
+     its full nowrap width) even when the column track is defined narrower -
+     that mismatch is what was making the button text wrap instead of the
+     column just being that width. min-width:0 makes every cell actually
+     obey the track sizes above. */
+  .it-mu-row > *{min-width:0;}
+  .it-mu-email{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .it-mu-master-badge{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:99px;background:var(--navy);color:#fff;vertical-align:middle;}
-  .it-mu-row select{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;}
-  .it-mu-row button{padding:6px 11px;font-size:12.5px;width:100%;white-space:nowrap;}
+  .it-mu-row select{font:inherit;font-size:12.5px;padding:6px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;}
+  .it-mu-row button{padding:6px 6px;font-size:12.5px;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .it-mu-row .it-mu-save{visibility:hidden;}
   .it-mu-row.it-mu-dirty .it-mu-save{visibility:visible;}
 
@@ -4450,7 +4457,12 @@
             '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project</option>' +
             '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>Viewer - all projects</option>' +
           '</select>' +
-          '<select class="it-mu-project" style="' + (projShown ? "" : "display:none") + '">' + itMuProjectOptionsHtml(u.projectId) + '</select>' +
+          /* visibility, not display:none - a display:none child is removed
+             from grid layout entirely, which would shift Save/Delete left
+             into this column and throw off the fixed-width alignment;
+             visibility:hidden keeps its grid cell (and so the columns after
+             it) exactly where they belong, just invisible. */
+          '<select class="it-mu-project" style="' + (projShown ? "" : "visibility:hidden") + '">' + itMuProjectOptionsHtml(u.projectId) + '</select>' +
           '<button type="button" class="it-mu-save it-primary">Save</button>' +
           '<button type="button" class="it-mu-delete">Delete login</button>' +
         '</div>'
@@ -4502,7 +4514,7 @@
     if (ev.target.classList.contains("it-mu-role")){
       var kind = ev.target.value;
       var projSel = rowEl.querySelector(".it-mu-project");
-      projSel.style.display = itMuKindNeedsProject(kind) ? "" : "none";
+      projSel.style.visibility = itMuKindNeedsProject(kind) ? "" : "hidden";
     }
     if (ev.target.classList.contains("it-mu-role") || ev.target.classList.contains("it-mu-project")){
       rowEl.classList.add("it-mu-dirty");
