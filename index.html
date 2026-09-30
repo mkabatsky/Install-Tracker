@@ -868,6 +868,7 @@
   var cloudNotifyCableChanged = function(){};
   var cloudNotifyProjectMetaChanged = function(){};
   var cloudNotifyBulkItemsReplaced = function(){};
+  var cloudCreateProjectFromBom = function(){ return false; };
 
   var ITEMS = []; // starts blank — build a schedule with Load BOM, or open a saved tracker .html
 
@@ -3337,9 +3338,15 @@
     if(!res.rooms.length) return;
     if(state.dirty && !confirm("The current schedule has unsaved progress. Replace it with this BOM anyway?")) return;
     var items = roomsToItems(res.rooms);
-    loadDataset(items, imp.project || "Untitled project");
-    cloudNotifyBulkItemsReplaced();
-    setDataSourceNote("Loaded from " + imp.files.join(", ") + " on " + new Date().toLocaleDateString() + " — " + plural(res.rooms.length, "room") + ", " + plural(items.length, "line item") + ".");
+    var bomProjectName = imp.project || "Untitled project";
+    var bomNote = "Loaded from " + imp.files.join(", ") + " on " + new Date().toLocaleDateString() + " — " + plural(res.rooms.length, "room") + ", " + plural(items.length, "line item") + ".";
+    if (cloudCreateProjectFromBom(bomProjectName, items, bomNote)){
+      bomClose();
+      imp = null;
+      return;
+    }
+    loadDataset(items, bomProjectName);
+    setDataSourceNote(bomNote);
     state.dirty = true;
     updateFileLabel();
     render();
@@ -4149,6 +4156,23 @@
     }).catch(function(e){ itProjectMsg("Couldn't create the project: " + (e && e.message ? e.message : e), true); });
   }
 
+  // Called when "Load BOM" finishes (see bomCommit) and there's no project
+  // open yet - rather than quietly loading the imported schedule nowhere
+  // (looked fine on screen, but was never actually saved anywhere and
+  // vanished on reload), this creates a brand-new cloud project from it,
+  // named after the BOM's own project field. Returns true if it took over
+  // (bomCommit should stop there); false means the normal local-in-place
+  // path should run instead - which happens whenever cloud sync isn't on,
+  // or a project is already open (Load BOM keeps replacing that project's
+  // items, exactly as it always has).
+  function itCreateProjectFromBom(name, items, note){
+    if (!itc.on || itc.projectId) return false;
+    itCreateProject(name, items).then(function(){
+      if (note) setDataSourceNote(note);
+    });
+    return true;
+  }
+
   // ----- find an item in ANY project -----
   function itCrossProjectSearch(){
     var term = itEl("itFindInput").value.trim();
@@ -4321,6 +4345,7 @@
     cloudNotifyCableChanged = itNotifyCableChanged;
     cloudNotifyProjectMetaChanged = itNotifyProjectMetaChanged;
     cloudNotifyBulkItemsReplaced = itNotifyBulkItemsReplaced;
+    cloudCreateProjectFromBom = itCreateProjectFromBom;
     window.addEventListener("beforeunload", function(e){
       if (!itIsDirty) return;
       e.preventDefault(); e.returnValue = "";
@@ -4664,7 +4689,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
