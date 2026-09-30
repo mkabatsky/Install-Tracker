@@ -557,6 +557,7 @@
   .it-find-hit .fh-proj{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .it-find-hit button{flex:none;padding:7px 12px;font-size:13px;}
 
+  .it-project-list-head{display:flex;justify-content:flex-end;flex:none;margin-top:8px;}
   .it-project-new{display:flex;gap:8px;flex-wrap:wrap;flex:none;}
   .it-project-new input{flex:1;min-width:150px;border:1px solid var(--border);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--text);font:inherit;font-size:16px;}
   .it-project-list{display:flex;flex-direction:column;flex:1 1 auto;min-height:60px;overflow:auto;margin-top:8px;}
@@ -792,6 +793,9 @@
     <div class="it-project-new">
       <input id="itNewName" type="text" placeholder="New project name" autocomplete="off" maxlength="120">
       <button class="it-primary" id="itNewBtn" type="button">Create project</button>
+    </div>
+    <div class="it-project-list-head">
+      <button class="tool-btn" id="itShowArchivedBtn" type="button">Show archived projects</button>
     </div>
     <div class="it-project-list" id="itProjectList"></div>
     <div class="it-project-msg" id="itProjectMsg" aria-live="polite"></div>
@@ -3502,6 +3506,7 @@
   var IT_SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js";
   var itSupabaseLibPromise = null;
   var itIsDirty = false; // true whenever there's a not-yet-sent change
+  var itShowArchived = false; // which half of the Projects list is showing right now
 
   function itLsGet(k){ try{ return window.localStorage.getItem(k); }catch(e){ return null; } }
   function itLsSet(k, v){ try{ window.localStorage.setItem(k, v); }catch(e){} }
@@ -3996,8 +4001,25 @@
     itEl("itLogin").hidden = true;
     return itResume();
   }
+  // A link like "...index.html?project=<id>" (e.g. from the new-project
+  // email) opens straight into that project instead of the normal list -
+  // falls through to the normal list if the id is missing, not found, or
+  // no longer visible to this account.
+  function itDeepLinkProjectId(){
+    try{ return new URLSearchParams(location.search).get("project") || null; }catch(e){ return null; }
+  }
   function itResume(){
-    return itc.sb.from("it_projects").select("id,name,meta,updated_at").eq("deleted", false).order("updated_at", {ascending: false}).then(function(r){
+    var deepLinkId = itDeepLinkProjectId();
+    if (deepLinkId){
+      return itc.sb.from("it_projects").select("id,name,meta").eq("id", deepLinkId).maybeSingle().then(function(r){
+        if (r.data && !r.error) return itOpenProject(r.data);
+        return itResumeShowList();
+      }).catch(itResumeShowList);
+    }
+    return itResumeShowList();
+  }
+  function itResumeShowList(){
+    return itc.sb.from("it_projects").select("id,name,meta,updated_at").eq("deleted", false).eq("archived", false).order("updated_at", {ascending: false}).then(function(r){
       if (r.error) throw r.error;
       var projects = r.data || [];
       itShowProjects(projects.length ? "" : "No projects yet. Create one below" + (itc.localSeed ? ", or upload the list already on this device." : "."));
@@ -4018,6 +4040,9 @@
     return "Updated " + d.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + " " + d.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"});
   }
   function itShowProjects(message){
+    itShowArchived = false;
+    var archBtn = itEl("itShowArchivedBtn");
+    if (archBtn) archBtn.textContent = "Show archived projects";
     itEl("itProjectsBackdrop").hidden = false;
     itEl("itFindInput").value = "";
     itEl("itFindResults").innerHTML = "";
@@ -4027,7 +4052,7 @@
   function itRenderProjectList(){
     var list = itEl("itProjectList");
     list.textContent = "Loading...";
-    return itc.sb.from("it_projects").select("id,name,meta,updated_at").eq("deleted", false).order("updated_at", {ascending: false}).then(function(r){
+    return itc.sb.from("it_projects").select("id,name,meta,updated_at,archived").eq("deleted", false).eq("archived", itShowArchived).order("updated_at", {ascending: false}).then(function(r){
       if (r.error) throw r.error;
       itDrawProjects(r.data || []);
     }).catch(function(){
@@ -4050,7 +4075,7 @@
     if (!projects.length){
       var empty = document.createElement("div");
       empty.className = "it-project-msg";
-      empty.textContent = offline ? "You're offline and no projects are saved on this device." : "No projects yet.";
+      empty.textContent = offline ? "You're offline and no projects are saved on this device." : (itShowArchived ? "No archived projects." : "No projects yet.");
       list.appendChild(empty);
       return;
     }
@@ -4072,12 +4097,24 @@
       open.addEventListener("click", function(){ itOpenProject(p); });
       row.appendChild(nm); row.appendChild(open);
       if (!offline){
+        var archiveBtn = document.createElement("button");
+        archiveBtn.type = "button"; archiveBtn.className = "tool-btn";
+        archiveBtn.textContent = p.archived ? "Unarchive" : "Archive";
+        archiveBtn.addEventListener("click", function(){
+          itc.sb.from("it_projects").update({archived: !p.archived, updated_by: itc.clientId}).eq("id", p.id).then(function(r){
+            if (r.error){ itProjectMsg("Couldn't " + (p.archived ? "unarchive" : "archive") + ": " + r.error.message, true); return; }
+            itRenderProjectList();
+          });
+        });
+        row.appendChild(archiveBtn);
+
         var del = document.createElement("button");
         del.type = "button"; del.className = "tool-btn"; del.textContent = "Delete";
         del.addEventListener("click", function(){
           if (!confirm('Delete the project "' + (p.name || "Untitled project") + '" for everyone? Its items will no longer be visible to anyone.')) return;
           itc.sb.from("it_projects").update({deleted: true, updated_by: itc.clientId}).eq("id", p.id).then(function(r){
             if (r.error){ itProjectMsg("Couldn't delete: " + r.error.message, true); return; }
+            notifyProjectDeleted({id: p.id, name: p.name});
             if (p.id === itc.projectId) itProjectGone(); else itRenderProjectList();
           });
         });
@@ -4087,9 +4124,11 @@
     });
   }
 
-  // no-op until it-roles.js turns it into a real email (see notify-new-project.ts) -
-  // the app behaves exactly as before when that layer isn't built in
+  // no-op until it-roles.js turns these into real emails (see
+  // notify-new-project.ts / notify-project-deleted.ts) - the app behaves
+  // exactly as before when that layer isn't built in
   var notifyNewProjectCreated = function(){};
+  var notifyProjectDeleted = function(){};
 
   function itCreateProject(name, seedItems){
     name = String(name || "").trim();
@@ -4182,6 +4221,12 @@
     newName.addEventListener("keydown", function(ev){ if (ev.key === "Enter"){ ev.preventDefault(); itEl("itNewBtn").click(); } });
     itEl("itProjectsClose").addEventListener("click", function(){ itEl("itProjectsBackdrop").hidden = true; });
     itEl("itProjectsBtn").addEventListener("click", function(){ itShowProjects(""); });
+    itEl("itShowArchivedBtn").addEventListener("click", function(ev){
+      itShowArchived = !itShowArchived;
+      ev.target.textContent = itShowArchived ? "Show active projects" : "Show archived projects";
+      itProjectMsg("");
+      itRenderProjectList();
+    });
     var findInput = itEl("itFindInput");
     itEl("itFindBtn").addEventListener("click", itCrossProjectSearch);
     findInput.addEventListener("keydown", function(ev){ if (ev.key === "Enter"){ ev.preventDefault(); itCrossProjectSearch(); } });
@@ -4390,14 +4435,20 @@
     });
   }
 
-  // ---------- new-project email ----------
+  // ---------- new-project / project-deleted emails ----------
   // Fires once, right after a brand-new project is created (see
   // itCreateProject) - tells operations a new project has been loaded into
-  // the tracker. Never fires for merely OPENING an existing project, only
-  // for creating one.
+  // the tracker, with a link straight into it. Never fires for merely
+  // OPENING an existing project, only for creating one.
   notifyNewProjectCreated = function(project){
     if (!project || !project.id) return;
-    itInvokeFn("notify-new-project", {projectId: project.id}).catch(function(e){ console.warn("new-project email failed", e); });
+    itInvokeFn("notify-new-project", {projectId: project.id, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("new-project email failed", e); });
+  };
+  // Fires once, right after a project is deleted (see the Delete button in
+  // the Projects list).
+  notifyProjectDeleted = function(project){
+    if (!project || !project.id) return;
+    itInvokeFn("notify-project-deleted", {projectId: project.id}).catch(function(e){ console.warn("project-deleted email failed", e); });
   };
 
   // ---------- manage users (staff only) ----------
