@@ -877,6 +877,8 @@
   var cloudNotifyProjectMetaChanged = function(){};
   var cloudNotifyBulkItemsReplaced = function(){};
   var cloudCreateProjectFromBom = function(){ return false; };
+  var cloudNotifyStatusChanged = function(){};
+  var cloudNotifyCableStatusChanged = function(){};
 
   var ITEMS = []; // starts blank — build a schedule with Load BOM, or open a saved tracker .html
 
@@ -1986,11 +1988,13 @@
 
   function updateCable(roomKey, checkKey, value, notes){
     var cable = ensureCable(roomKey);
+    var prevValue = cable[checkKey];
     if(value !== null) cable[checkKey] = value;
     if(notes !== null) cable[checkKey + "Notes"] = notes;
     state.dirty = true;
     updateFileLabel();
     cloudNotifyCableChanged(roomKey);
+    if (value !== null && value !== prevValue) cloudNotifyCableStatusChanged(roomKey, checkKey, prevValue, value);
     render();
   }
 
@@ -2094,10 +2098,12 @@
   function updateItem(id, patch, skipRender){
     var cur = state.items[id];
     if(!cur) return;
+    var prevStatus = cur.status;
     Object.assign(cur, patch, { updatedAt: new Date().toISOString() });
     state.dirty = true;
     updateFileLabel();
     cloudNotifyItemChanged(id);
+    if (patch.status !== undefined && patch.status !== prevStatus) cloudNotifyStatusChanged(cur, prevStatus, patch.status);
     if(!skipRender){
       render();
       restoreFocusAfterRender(id, patch);
@@ -4484,6 +4490,86 @@
     itInvokeFn("notify-project-deleted", {projectId: project.id}).catch(function(e){ console.warn("project-deleted email failed", e); });
   };
 
+  // ---------- status-change batching + email ----------
+  // Individual item/cable status changes and bulk "Mark floor/room
+  // installed" actions (which are just many individual item changes fired
+  // at once - see completeItems) all funnel through cloudNotifyStatusChanged
+  // / cloudNotifyCableStatusChanged. Rather than one email per click - which
+  // could mean dozens of emails in a short editing session - these collect
+  // into a batch and go out as one summary email a few minutes after the
+  // first change in that batch, with a snapshot of the overall % installed
+  // taken at send time (not per-change). If the tab closes before a batch
+  // flushes, beforeunload below makes a best-effort attempt to send it
+  // anyway, but this is still a convenience notification, not an audit log.
+  var IT_STATUS_BATCH_DELAY_MS = 3 * 60 * 1000; // 3 minutes
+  var itStatusBatch = []; // [{kind:"item"|"cable", room, label, from, to}]
+  var itStatusBatchTimer = null;
+  var itStatusBatchProjectId = null;
+
+  function itRoomNumberForKey(roomKey){
+    for (var i = 0; i < state.order.length; i++){
+      var it = state.items[state.order[i]];
+      if (it && it.roomKey === roomKey) return it.roomNumber;
+    }
+    return roomKey;
+  }
+
+  function itQueueStatusChange(entry){
+    if (!itc.projectId) return;
+    // a batch belongs to one project - if the open project changed since
+    // the batch started, flush the old one under its own project instead
+    // of mislabeling it as belonging to whatever's open now
+    if (itStatusBatch.length && itStatusBatchProjectId !== itc.projectId) itFlushStatusBatch();
+    itStatusBatchProjectId = itc.projectId;
+    itStatusBatch.push(entry);
+    if (!itStatusBatchTimer) itStatusBatchTimer = setTimeout(itFlushStatusBatch, IT_STATUS_BATCH_DELAY_MS);
+  }
+
+  cloudNotifyStatusChanged = function(item, fromStatus, toStatus){
+    itQueueStatusChange({
+      kind: "item",
+      room: item.roomNumber,
+      label: itItemLabel(item),
+      from: STATUS_LABEL[fromStatus] || fromStatus,
+      to: STATUS_LABEL[toStatus] || toStatus
+    });
+  };
+  cloudNotifyCableStatusChanged = function(roomKey, checkKey, fromValue, toValue){
+    var check = cableCheckByKey(checkKey);
+    itQueueStatusChange({
+      kind: "cable",
+      room: itRoomNumberForKey(roomKey),
+      label: (check && check.label) || checkKey,
+      from: cableOptionLabel(checkKey, fromValue),
+      to: cableOptionLabel(checkKey, toValue)
+    });
+  };
+
+  function itFlushStatusBatch(){
+    clearTimeout(itStatusBatchTimer);
+    itStatusBatchTimer = null;
+    var changes = itStatusBatch;
+    var projectId = itStatusBatchProjectId;
+    itStatusBatch = [];
+    itStatusBatchProjectId = null;
+    if (!changes.length || !projectId) return;
+
+    var allItems = state.order.map(function(id){ return state.items[id]; }).filter(Boolean);
+    var floors = groupByFloor();
+    var allRooms = [];
+    floors.forEach(function(f){ allRooms = allRooms.concat(f.rooms); });
+    var overall = computeStats(allItems, allRooms);
+    var cableTotals = computeCableTotals();
+    var snapshot = {
+      pct: overall.pct, installed: overall.installed, inProgress: overall.inProgress, notStarted: overall.notStarted,
+      cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms
+    };
+    itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot}).catch(function(e){ console.warn("status-change email failed", e); });
+  }
+  // best-effort - a real send here isn't guaranteed (the page is closing),
+  // but it's worth trying rather than silently dropping a pending batch
+  window.addEventListener("beforeunload", function(){ if (itStatusBatch.length) itFlushStatusBatch(); });
+
   // ---------- manage users (staff only) ----------
   // "Role" in the UI is one of 3 kinds; the database only knows role +
   // project_id, so viewer-locked/viewer-any are both stored as
@@ -4697,7 +4783,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
