@@ -1753,9 +1753,13 @@
 
   function cablePulledPct(roomKey){
     var cable = state.cable[roomKey];
-    var v = cable ? cable.pulled : "not_installed";
-    if(v === "installed" || v === "na") return 100;
-    if(v === "in_progress") return 50;
+    if(!cable) return 0;
+    // Terminated or tested (passed) can only happen to a cable that was
+    // already pulled, so either of those also counts as pulling being
+    // done - even if "Cable Pulled?" itself was never explicitly set to
+    // Installed (e.g. someone jumped straight to marking it terminated).
+    if(cable.pulled === "installed" || cable.pulled === "na" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
+    if(cable.pulled === "in_progress") return 50;
     return 0;
   }
 
@@ -2402,6 +2406,7 @@
     });
 
     document.getElementById("printArea").innerHTML = html;
+    return html;
   }
 
   function downloadPdf(){
@@ -4487,7 +4492,7 @@
   // the Projects list).
   notifyProjectDeleted = function(project){
     if (!project || !project.id) return;
-    itInvokeFn("notify-project-deleted", {projectId: project.id}).catch(function(e){ console.warn("project-deleted email failed", e); });
+    itInvokeFn("notify-project-deleted", {projectId: project.id, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("project-deleted email failed", e); });
   };
 
   // ---------- status-change batching + email ----------
@@ -4564,7 +4569,11 @@
       pct: overall.pct, installed: overall.installed, inProgress: overall.inProgress, notStarted: overall.notStarted,
       cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms
     };
-    itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot}).catch(function(e){ console.warn("status-change email failed", e); });
+    // the same full dashboard + per-room/item report used by "Download PDF" -
+    // buildPrintReport() also (harmlessly) refreshes the hidden #printArea
+    // as a side effect, same as it always has for the PDF feature
+    var reportHtml = buildPrintReport();
+    itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot, reportHtml: reportHtml, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("status-change email failed", e); });
   }
   // best-effort - a real send here isn't guaranteed (the page is closing),
   // but it's worth trying rather than silently dropping a pending batch
