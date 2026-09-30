@@ -606,6 +606,10 @@
      the whole item list. Export/PDF/Expand-all are read-only and stay. */
   body.it-role-viewer #bomBtn, body.it-role-viewer #loadBtn{display:none !important;}
   body.it-role-viewer #itManageUsersBtn{display:none !important;}
+  body.it-role-viewer #itSubmitReportBtn{display:none !important;}
+  /* dims and disables (rather than hides) once there's nothing queued, so
+     it's still there as a reminder the feature exists */
+  #itSubmitReportBtn:disabled{opacity:.5;cursor:default;}
 
   /* everything inside the floor/room tree that lets you change data: the
      in-scope checkbox, status/cable dropdowns, and notes text, plus the
@@ -695,6 +699,7 @@
         <span id="itSyncLabel">Starting…</span>
         <span id="itRoleBanner"></span>
         <span class="it-cloud-user" id="itCloudUser"></span>
+        <button class="tool-btn" id="itSubmitReportBtn" type="button" title="Send the status-update email now instead of waiting">Submit</button>
         <button class="tool-btn" id="itManageUsersBtn" type="button">Manage users</button>
         <button class="tool-btn" id="itProjectsBtn" type="button">Projects</button>
         <button class="tool-btn" id="itSignOutBtn" type="button">Sign out</button>
@@ -740,7 +745,7 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V9"/><path d="M7 14l5-5 5 5"/><path d="M5 21h14"/></svg>
         Load progress
       </button>
-      <input type="file" id="loadFileInput" accept=".html,.htm,.json,text/html,application/json" hidden>
+      <input type="file" id="loadFileInput" accept=".html,.htm,.json,.xlsx,.xlsm,text/html,application/json" hidden>
       <button class="tool-btn" id="saveBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
         Save progress
@@ -2669,7 +2674,107 @@
     return JSON.parse(t);
   }
 
+  // Re-reads the app's own "Export Excel" layout (Floor/Room/Room Type/#/
+  // Mfr / Model/Description/Qty/Status/Notes) and applies the Status/Notes
+  // columns back onto the CURRENTLY loaded schedule - same precondition as
+  // the .html/.json path: build the schedule with Load BOM first, then load
+  // progress on top of it. Matches each row to an item by floor + room +
+  // Mfr/Model + Description (the export has no hidden id column to match
+  // on directly), so this only works reliably against a schedule whose
+  // rows are the same ones that were exported in the first place.
+  var EXCEL_PROGRESS_HEADER = ["Floor","Room","Room Type","#","Mfr / Model","Description","Qty","Status","Notes"];
+  var EXCEL_STATUS_BY_LABEL = { "Not started":"not_started", "In progress":"in_progress", "Installed":"installed" };
+
+  function applyExcelProgress(sheets){
+    if(!state.order.length){
+      return { error: "This spreadsheet has nothing to load progress into yet - build the schedule with Load BOM first, then load progress on top of it." };
+    }
+    var rows = null;
+    for(var s = 0; s < sheets.length && !rows; s++){
+      var sheetRows = sheets[s].rows || [];
+      for(var i = 0; i < sheetRows.length; i++){
+        var row = sheetRows[i] || [];
+        if(EXCEL_PROGRESS_HEADER.every(function(h, ci){ return String(row[ci] == null ? "" : row[ci]).trim() === h; })){
+          rows = sheetRows.slice(i + 1);
+          break;
+        }
+      }
+    }
+    if(!rows) return { error: "That doesn't look like an Install Tracker Excel export (Export Excel) - the expected columns weren't found." };
+
+    var usedIds = {};
+    var curFloor = null, curRoomNumber = null;
+    var applied = 0, cableApplied = 0, cableTouched = {};
+
+    rows.forEach(function(row){
+      if(!row || !row.length) return;
+      var col0 = row[0], col1 = row[1], col3 = row[3], col4 = row[4], col5 = row[5], col7 = row[7], col8 = row[8];
+      var mm = String(col4 == null ? "" : col4).trim();
+      var desc = String(col5 == null ? "" : col5).trim();
+
+      if(mm !== ""){
+        // an item row - floor/room come straight off this row, not tracked
+        // separately, so a non-numeric floor label (e.g. "B1") works fine
+        curFloor = col0; curRoomNumber = String(col1 == null ? "" : col1).trim();
+        var statusLabel = String(col7 == null ? "" : col7).trim();
+        var match = null;
+        for(var i = 0; i < state.order.length; i++){
+          var id = state.order[i];
+          if(usedIds[id]) continue;
+          var it = state.items[id];
+          if(!it) continue;
+          if(String(it.floor) !== String(curFloor)) continue;
+          if(String(it.roomNumber) !== curRoomNumber) continue;
+          if([it.mfr, it.model].filter(Boolean).join(" · ") !== mm) continue;
+          if(String(it.description || "") !== desc) continue;
+          match = it; usedIds[id] = true; break;
+        }
+        if(match){
+          if(statusLabel === "Out of scope") match.inScope = false;
+          else if(EXCEL_STATUS_BY_LABEL[statusLabel]){ match.inScope = true; match.status = EXCEL_STATUS_BY_LABEL[statusLabel]; }
+          if(col8 != null) match.notes = String(col8);
+          applied++;
+        }
+        return;
+      }
+
+      // not an item row - a cable-check row has an empty Mfr/Model but a
+      // running index in "#" and one of the cable check labels in
+      // "Description"; anything else (a floor/room divider row) is skipped
+      var label = String(col5 == null ? "" : col5).trim();
+      if(col3 == null || String(col3).trim() === "" || !label || curRoomNumber == null) return;
+      var check = CABLE_CHECKS.filter(function(c){ return c.label === label; })[0];
+      if(!check) return;
+      var realKey = null;
+      for(var j = 0; j < state.order.length; j++){
+        var itj = state.items[state.order[j]];
+        if(itj && String(itj.floor) === String(curFloor) && String(itj.roomNumber) === curRoomNumber){ realKey = itj.roomKey; break; }
+      }
+      if(!realKey) return;
+      var valueLabel = String(col7 == null ? "" : col7).trim();
+      var opt = check.options.filter(function(o){ return o.label === valueLabel; })[0];
+      if(!opt) return;
+      var cable = ensureCable(realKey);
+      cable[check.key] = opt.value;
+      if(col8) cable[check.key + "Notes"] = String(col8);
+      if(!cableTouched[realKey]){ cableTouched[realKey] = true; cableApplied++; }
+    });
+
+    state.dirty = true;
+    updateFileLabel();
+    render();
+    return { applied: applied, cableApplied: cableApplied };
+  }
+
   function loadProgress(file){
+    if(/\.(xlsx|xlsm)$/i.test(file.name)){
+      window.XlsxReader.readFile(file).then(function(sheets){
+        var res = applyExcelProgress(sheets);
+        if(res.error){ alert(res.error); return; }
+        alert("Loaded " + plural(res.applied, "item") + (res.cableApplied ? " and cable status for " + plural(res.cableApplied, "room") : "") + " from " + file.name + ".");
+      }).catch(function(e){ alert("Couldn't read that Excel file: " + (e && e.message ? e.message : e)); });
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function(){
       var parsed;
@@ -4502,14 +4607,25 @@
   // / cloudNotifyCableStatusChanged. Rather than one email per click - which
   // could mean dozens of emails in a short editing session - these collect
   // into a batch and go out as one summary email a few minutes after the
-  // first change in that batch, with a snapshot of the overall % installed
-  // taken at send time (not per-change). If the tab closes before a batch
+  // first change in that batch.
+  //
+  // The snapshot and full report are captured FRESH on every queued change,
+  // right then and there - NOT recomputed later when the batch finally
+  // flushes. That timing matters: the flush fires up to 3 minutes after the
+  // last change, and by then the person may well have switched to (or even
+  // just opened) a completely different project - at which point state/
+  // groupByFloor()/etc. all describe THAT project, not the one the changes
+  // actually happened in. Capturing them immediately, while the change's
+  // own project is still the one open, is what keeps the email accurate no
+  // matter what the person does afterward. If the tab closes before a batch
   // flushes, beforeunload below makes a best-effort attempt to send it
   // anyway, but this is still a convenience notification, not an audit log.
   var IT_STATUS_BATCH_DELAY_MS = 3 * 60 * 1000; // 3 minutes
   var itStatusBatch = []; // [{kind:"item"|"cable", room, label, from, to}]
   var itStatusBatchTimer = null;
   var itStatusBatchProjectId = null;
+  var itStatusBatchSnapshot = null;
+  var itStatusBatchReportHtml = "";
 
   function itRoomNumberForKey(roomKey){
     for (var i = 0; i < state.order.length; i++){
@@ -4519,15 +4635,45 @@
     return roomKey;
   }
 
+  function itCaptureStatusSnapshot(){
+    var allItems = state.order.map(function(id){ return state.items[id]; }).filter(Boolean);
+    var floors = groupByFloor();
+    var allRooms = [];
+    floors.forEach(function(f){ allRooms = allRooms.concat(f.rooms); });
+    var overall = computeStats(allItems, allRooms);
+    var cableTotals = computeCableTotals();
+    return {
+      pct: overall.pct, installed: overall.installed, inProgress: overall.inProgress, notStarted: overall.notStarted,
+      cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms
+    };
+  }
+
+  // Reflects how many changes are waiting in the header's Submit button -
+  // "Submit" (nothing queued, disabled) or "Submit (3)" (ready to send now
+  // instead of waiting for the timer).
+  function itUpdateSubmitBtn(){
+    var btn = itEl("itSubmitReportBtn");
+    if (!btn) return;
+    var n = itStatusBatch.length;
+    btn.disabled = n === 0;
+    btn.textContent = n === 0 ? "Submit" : "Submit (" + n + ")";
+  }
+
   function itQueueStatusChange(entry){
     if (!itc.projectId) return;
     // a batch belongs to one project - if the open project changed since
-    // the batch started, flush the old one under its own project instead
-    // of mislabeling it as belonging to whatever's open now
+    // the batch started, flush the old one under its own project (using
+    // ITS already-captured snapshot/report) instead of mislabeling it as
+    // belonging to whatever's open now
     if (itStatusBatch.length && itStatusBatchProjectId !== itc.projectId) itFlushStatusBatch();
     itStatusBatchProjectId = itc.projectId;
     itStatusBatch.push(entry);
+    // captured now, while this project is definitely the one open - see the
+    // big comment above for why this can't wait until flush time
+    itStatusBatchSnapshot = itCaptureStatusSnapshot();
+    itStatusBatchReportHtml = buildPrintReport(); // also refreshes the hidden #printArea, same as "Download PDF" always has
     if (!itStatusBatchTimer) itStatusBatchTimer = setTimeout(itFlushStatusBatch, IT_STATUS_BATCH_DELAY_MS);
+    itUpdateSubmitBtn();
   }
 
   cloudNotifyStatusChanged = function(item, fromStatus, toStatus){
@@ -4555,29 +4701,47 @@
     itStatusBatchTimer = null;
     var changes = itStatusBatch;
     var projectId = itStatusBatchProjectId;
+    var snapshot = itStatusBatchSnapshot;
+    var reportHtml = itStatusBatchReportHtml;
     itStatusBatch = [];
     itStatusBatchProjectId = null;
-    if (!changes.length || !projectId) return;
+    itStatusBatchSnapshot = null;
+    itStatusBatchReportHtml = "";
+    itUpdateSubmitBtn();
+    if (!changes.length || !projectId) return Promise.resolve();
 
-    var allItems = state.order.map(function(id){ return state.items[id]; }).filter(Boolean);
-    var floors = groupByFloor();
-    var allRooms = [];
-    floors.forEach(function(f){ allRooms = allRooms.concat(f.rooms); });
-    var overall = computeStats(allItems, allRooms);
-    var cableTotals = computeCableTotals();
-    var snapshot = {
-      pct: overall.pct, installed: overall.installed, inProgress: overall.inProgress, notStarted: overall.notStarted,
-      cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms
-    };
-    // the same full dashboard + per-room/item report used by "Download PDF" -
-    // buildPrintReport() also (harmlessly) refreshes the hidden #printArea
-    // as a side effect, same as it always has for the PDF feature
-    var reportHtml = buildPrintReport();
-    itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot, reportHtml: reportHtml, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("status-change email failed", e); });
+    return itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot || {}, reportHtml: reportHtml, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("status-change email failed", e); throw e; });
   }
   // best-effort - a real send here isn't guaranteed (the page is closing),
   // but it's worth trying rather than silently dropping a pending batch
   window.addEventListener("beforeunload", function(){ if (itStatusBatch.length) itFlushStatusBatch(); });
+
+  // "Submit" button in the header - sends whatever's queued right now
+  // instead of waiting out the rest of the batch delay.
+  var itSubmitReportBtnEl = itEl("itSubmitReportBtn");
+  if (itSubmitReportBtnEl){
+    itSubmitReportBtnEl.disabled = true;
+    itSubmitReportBtnEl.addEventListener("click", function(){
+      if (!itStatusBatch.length) return; // shouldn't happen - the button is disabled whenever there's nothing queued
+      // itFlushStatusBatch() synchronously clears the batch and calls
+      // itUpdateSubmitBtn() itself (resetting to disabled "Submit") before
+      // its network call even starts - so "Sending..." is set AFTER calling
+      // it, not before, or that reset would immediately overwrite it
+      var pending = itFlushStatusBatch();
+      itSubmitReportBtnEl.disabled = true;
+      itSubmitReportBtnEl.textContent = "Sending...";
+      // the batch is cleared as soon as flush starts (same as the timer
+      // path), so a failed send here isn't retryable from this button -
+      // same best-effort trade-off as everything else in this feature
+      pending.then(function(){
+        itSubmitReportBtnEl.textContent = "Sent!";
+        setTimeout(itUpdateSubmitBtn, 1500);
+      }).catch(function(){
+        itSubmitReportBtnEl.textContent = "Couldn't send";
+        setTimeout(itUpdateSubmitBtn, 2500);
+      });
+    });
+  }
 
   // ---------- manage users (staff only) ----------
   // "Role" in the UI is one of 3 kinds; the database only knows role +
@@ -4792,7 +4956,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
