@@ -323,6 +323,14 @@
   footer{ text-align:center; color:var(--text-faint); font-size:11.5px; padding:18px 0 30px; }
 
   @media (max-width:560px){
+    /* The sticky top bar (brand + dashboard card + search + filter chips)
+       runs well over half the screen height on a phone - kept sticky, it
+       re-claims that same huge chunk the moment you're anywhere near the
+       top, which feels like "I can't scroll up, the dashboard is in the
+       way" since most of the screen gets covered by it again and again.
+       Letting it scroll away normally on narrow screens fixes that; nothing
+       about it depended on staying pinned in the first place. */
+    .topbar{ position:static; }
     .brand h1{ font-size:20px; }
     .overall{ width:100%; justify-content:space-between; }
     .item{ grid-template-columns:18px 1fr; }
