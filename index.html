@@ -4609,15 +4609,15 @@
   // into a batch and go out as one summary email a few minutes after the
   // first change in that batch.
   //
-  // The snapshot and full report are captured FRESH on every queued change,
-  // right then and there - NOT recomputed later when the batch finally
-  // flushes. That timing matters: the flush fires up to 3 minutes after the
-  // last change, and by then the person may well have switched to (or even
-  // just opened) a completely different project - at which point state/
-  // groupByFloor()/etc. all describe THAT project, not the one the changes
-  // actually happened in. Capturing them immediately, while the change's
-  // own project is still the one open, is what keeps the email accurate no
-  // matter what the person does afterward. If the tab closes before a batch
+  // The snapshot is captured FRESH on every queued change, right then and
+  // there - NOT recomputed later when the batch finally flushes. That
+  // timing matters: the flush fires up to 3 minutes after the last change,
+  // and by then the person may well have switched to (or even just opened)
+  // a completely different project - at which point state/groupByFloor()/
+  // etc. all describe THAT project, not the one the changes actually
+  // happened in. Capturing it immediately, while the change's own project
+  // is still the one open, is what keeps the email accurate no matter what
+  // the person does afterward. If the tab closes before a batch
   // flushes, beforeunload below makes a best-effort attempt to send it
   // anyway, but this is still a convenience notification, not an audit log.
   var IT_STATUS_BATCH_DELAY_MS = 3 * 60 * 1000; // 3 minutes
@@ -4625,7 +4625,6 @@
   var itStatusBatchTimer = null;
   var itStatusBatchProjectId = null;
   var itStatusBatchSnapshot = null;
-  var itStatusBatchReportHtml = "";
 
   function itRoomNumberForKey(roomKey){
     for (var i = 0; i < state.order.length; i++){
@@ -4663,7 +4662,7 @@
     if (!itc.projectId) return;
     // a batch belongs to one project - if the open project changed since
     // the batch started, flush the old one under its own project (using
-    // ITS already-captured snapshot/report) instead of mislabeling it as
+    // ITS already-captured snapshot) instead of mislabeling it as
     // belonging to whatever's open now
     if (itStatusBatch.length && itStatusBatchProjectId !== itc.projectId) itFlushStatusBatch();
     itStatusBatchProjectId = itc.projectId;
@@ -4671,7 +4670,6 @@
     // captured now, while this project is definitely the one open - see the
     // big comment above for why this can't wait until flush time
     itStatusBatchSnapshot = itCaptureStatusSnapshot();
-    itStatusBatchReportHtml = buildPrintReport(); // also refreshes the hidden #printArea, same as "Download PDF" always has
     if (!itStatusBatchTimer) itStatusBatchTimer = setTimeout(itFlushStatusBatch, IT_STATUS_BATCH_DELAY_MS);
     itUpdateSubmitBtn();
   }
@@ -4702,15 +4700,13 @@
     var changes = itStatusBatch;
     var projectId = itStatusBatchProjectId;
     var snapshot = itStatusBatchSnapshot;
-    var reportHtml = itStatusBatchReportHtml;
     itStatusBatch = [];
     itStatusBatchProjectId = null;
     itStatusBatchSnapshot = null;
-    itStatusBatchReportHtml = "";
     itUpdateSubmitBtn();
     if (!changes.length || !projectId) return Promise.resolve();
 
-    return itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot || {}, reportHtml: reportHtml, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("status-change email failed", e); throw e; });
+    return itInvokeFn("notify-status-change", {projectId: projectId, changes: changes, snapshot: snapshot || {}, appUrl: location.origin + location.pathname}).catch(function(e){ console.warn("status-change email failed", e); throw e; });
   }
   // best-effort - a real send here isn't guaranteed (the page is closing),
   // but it's worth trying rather than silently dropping a pending batch
