@@ -606,6 +606,7 @@
      the whole item list. Export/PDF/Expand-all are read-only and stay. */
   body.it-role-viewer #bomBtn, body.it-role-viewer #loadBtn{display:none !important;}
   body.it-role-viewer #itManageUsersBtn{display:none !important;}
+  body.it-role-viewer #itDashboardBtn{display:none !important;}
   body.it-role-viewer #itSubmitReportBtn{display:none !important;}
   /* dims and disables (rather than hides) once there's nothing queued, so
      it's still there as a reminder the feature exists */
@@ -676,6 +677,22 @@
   @media (max-width:640px){
     .it-mu-new-fields{grid-template-columns:1fr;}
   }
+
+  /* =================== projects dashboard (staff only) =================== */
+  .it-dashboard-panel{max-width:620px;}
+  .it-dash-list{max-height:480px;overflow:auto;display:flex;flex-direction:column;gap:10px;}
+  .it-dash-card{border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;background:var(--surface);}
+  .it-dash-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;}
+  .it-dash-name{font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;}
+  .it-dash-open-btn{padding:6px 12px;font-size:12.5px;}
+  /* reuses the exact same .overall/.pct/.overall-bar family the live
+     per-project header already uses, so a project's card here looks
+     identical to its own dashboard once opened - just without the
+     surrounding card chrome (this already has its own) and a wider bar. */
+  .it-dash-card .overall{border:none;box-shadow:none;padding:0;background:transparent;}
+  .it-dash-card .overall-bar{width:100%;}
+  .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
+  .it-dash-msg.bad{color:var(--danger);font-weight:600;}
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1c2331">
@@ -700,6 +717,7 @@
         <span id="itRoleBanner"></span>
         <span class="it-cloud-user" id="itCloudUser"></span>
         <button class="tool-btn" id="itSubmitReportBtn" type="button" title="Send the status-update email now instead of waiting">Submit</button>
+        <button class="tool-btn" id="itDashboardBtn" type="button">Dashboard</button>
         <button class="tool-btn" id="itManageUsersBtn" type="button">Manage users</button>
         <button class="tool-btn" id="itProjectsBtn" type="button">Projects</button>
         <button class="tool-btn" id="itSignOutBtn" type="button">Sign out</button>
@@ -844,6 +862,20 @@
       </div>
       <button class="it-primary" id="itMuCreateBtn" type="button">Create user</button>
     </div>
+  </div>
+</div>
+
+<div class="it-modal-backdrop" id="itDashboardBackdrop" hidden="">
+  <div class="it-modal-panel it-dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="itDashboardTitle">
+    <div class="it-modal-head">
+      <h2 id="itDashboardTitle">Projects dashboard</h2>
+      <button class="it-icon-btn" id="itDashboardClose" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <p class="it-modal-sub">Full-access staff only. Every active project's progress at a glance, busiest first.</p>
+    <div class="it-dash-list" id="itDashList"></div>
+    <div class="it-dash-msg" id="itDashMsg" aria-live="polite"></div>
   </div>
 </div>
 <div id="printArea"></div>
@@ -4946,6 +4978,159 @@
   if (itManageUsersCloseEl) itManageUsersCloseEl.addEventListener("click", itCloseManageUsersModal);
   var itManageUsersBackdropEl = itEl("itManageUsersBackdrop");
   if (itManageUsersBackdropEl) itManageUsersBackdropEl.addEventListener("click", function(ev){ if (ev.target === itManageUsersBackdropEl) itCloseManageUsersModal(); });
+
+  // ---------- projects dashboard (staff only) ----------
+  // Mirrors cablePulledPct()/computeStats()/computeCableTotals() above
+  // exactly (same CABLE_PULLED_WEIGHT, same "pulled/na/terminated/pass -
+  // >100%, in_progress->50%, else 0%" rule) but parameterized instead of
+  // reading the live state.cable/state.items - those only ever hold the
+  // ONE currently-open project, and this needs every project's numbers at
+  // once without disturbing whatever's actually open.
+  function itdCablePct(cable){
+    if (!cable) return 0;
+    if (cable.pulled === "installed" || cable.pulled === "na" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
+    if (cable.pulled === "in_progress") return 50;
+    return 0;
+  }
+
+  function itdComputeStats(items, cableByRoomKey){
+    var scoped = items.filter(function(it){ return it.inScope; });
+    var installed = scoped.filter(function(it){ return it.status === "installed"; }).length;
+    var inProgress = scoped.filter(function(it){ return it.status === "in_progress"; }).length;
+    var notStarted = scoped.filter(function(it){ return it.status === "not_started"; }).length;
+    var equipPct = scoped.length ? (installed / scoped.length * 100) : 0;
+
+    var roomMap = {};
+    items.forEach(function(it){
+      var k = it.roomKey;
+      (roomMap[k] = roomMap[k] || []).push(it);
+    });
+    var roomKeys = Object.keys(roomMap);
+    var pct;
+    if (roomKeys.length){
+      var weightedSum = 0, totalWeight = 0;
+      roomKeys.forEach(function(k){
+        var roomItems = roomMap[k];
+        var w = roomItems.filter(function(it){ return it.inScope; }).length;
+        if (!w) w = roomItems.length || 1;
+        weightedSum += itdCablePct(cableByRoomKey[k]) * w;
+        totalWeight += w;
+      });
+      var cablePct = totalWeight ? (weightedSum / totalWeight) : 0;
+      pct = Math.round(equipPct * (1 - CABLE_PULLED_WEIGHT) + cablePct * CABLE_PULLED_WEIGHT);
+    } else {
+      pct = Math.round(equipPct);
+    }
+
+    var cableKeys = Object.keys(cableByRoomKey);
+    var cablePulled = 0, cableTerminated = 0, cableTested = 0;
+    cableKeys.forEach(function(k){
+      var c = cableByRoomKey[k];
+      if (c.pulled === "installed") cablePulled++;
+      if (c.terminated === "terminated") cableTerminated++;
+      if (c.tested === "pass") cableTested++;
+    });
+
+    return {
+      pct: pct, installed: installed, inProgress: inProgress, notStarted: notStarted,
+      cablePulled: cablePulled, cableTerminated: cableTerminated, cableTested: cableTested, cableTotalRooms: cableKeys.length
+    };
+  }
+
+  function itDashMsg(text, kind){
+    var m = itEl("itDashMsg");
+    m.textContent = text || "";
+    m.className = "it-dash-msg" + (kind ? " " + kind : "");
+  }
+
+  // One query per table across EVERY active project, aggregated
+  // client-side, rather than one query per project.
+  function itLoadDashboard(){
+    var list = itEl("itDashList");
+    list.textContent = "Loading...";
+    itDashMsg("");
+    return Promise.all([
+      itc.sb.from("it_projects").select("id,name,meta").eq("deleted", false).eq("archived", false),
+      itc.sb.from("it_items").select("project_id,data").eq("deleted", false),
+      itc.sb.from("it_cable").select("project_id,room_key,data").eq("deleted", false)
+    ]).then(function(results){
+      var projectsRes = results[0], itemsRes = results[1], cableRes = results[2];
+      if (projectsRes.error){ itDashMsg("Couldn't load: " + projectsRes.error.message, "bad"); list.textContent = ""; return; }
+      var itemsByProject = {}, cableByProject = {};
+      (itemsRes.data || []).forEach(function(r){
+        (itemsByProject[r.project_id] = itemsByProject[r.project_id] || []).push(r.data || {});
+      });
+      (cableRes.data || []).forEach(function(r){
+        var m = (cableByProject[r.project_id] = cableByProject[r.project_id] || {});
+        m[r.room_key] = r.data || {};
+      });
+      itRenderDashboard(projectsRes.data || [], itemsByProject, cableByProject);
+    }).catch(function(e){
+      itDashMsg("Couldn't load: " + (e && e.message ? e.message : e), "bad");
+      list.textContent = "";
+    });
+  }
+
+  function itRenderDashboard(projects, itemsByProject, cableByProject){
+    var list = itEl("itDashList");
+    if (!projects.length){ list.innerHTML = ""; itDashMsg("No active projects yet."); return; }
+    itDashMsg("");
+    var cards = projects.map(function(p){
+      var stats = itdComputeStats(itemsByProject[p.id] || [], cableByProject[p.id] || {});
+      return {project: p, stats: stats};
+    });
+    // lowest % complete first, so whichever project needs the most
+    // attention surfaces at the top instead of being buried in whatever
+    // order the database happens to return
+    cards.sort(function(a, b){ return a.stats.pct - b.stats.pct; });
+    list.innerHTML = cards.map(function(c){
+      var p = c.project, s = c.stats;
+      var pMeta = p.meta || {};
+      var name = pMeta.projectName || p.name || "Untitled project";
+      return '<div class="it-dash-card">' +
+        '<div class="it-dash-card-head"><span class="it-dash-name">' + escapeHtml(name) + '</span>' +
+          '<button type="button" class="it-dash-open-btn" data-itd-open="' + p.id + '">Open</button></div>' +
+        '<div class="overall">' +
+          '<div><div class="pct mono">' + s.pct + '%</div><div class="pct-label">installed</div></div>' +
+          '<div class="overall-bar"><div class="track"><div class="fill" style="width:' + s.pct + '%"></div></div>' +
+          '<div class="counts">' +
+            '<span><b>' + s.installed + '</b> installed</span>' +
+            '<span><b>' + s.inProgress + '</b> in progress</span>' +
+            '<span><b>' + s.notStarted + '</b> not started</span>' +
+            '<span class="cable-count"><b>' + s.cablePulled + ' / ' + s.cableTotalRooms + '</b> rooms cable pulled</span>' +
+            '<span class="cable-count"><b>' + s.cableTerminated + ' / ' + s.cableTotalRooms + '</b> rooms cable terminated</span>' +
+            '<span class="cable-count"><b>' + s.cableTested + ' / ' + s.cableTotalRooms + '</b> rooms cable tested</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+  }
+
+  function itOpenDashboardModal(){
+    itEl("itDashboardBackdrop").hidden = false;
+    itLoadDashboard();
+  }
+  function itCloseDashboardModal(){ itEl("itDashboardBackdrop").hidden = true; }
+
+  document.addEventListener("click", function(ev){
+    var openBtn = ev.target.closest && ev.target.closest("[data-itd-open]");
+    if (!openBtn) return;
+    var projectId = openBtn.dataset.itdOpen;
+    openBtn.disabled = true;
+    itc.sb.from("it_projects").select("id,name,meta").eq("id", projectId).maybeSingle().then(function(pr){
+      openBtn.disabled = false;
+      if (pr.error || !pr.data){ itDashMsg("Couldn't open that project - it may have been deleted.", "bad"); return; }
+      itCloseDashboardModal();
+      itOpenProject(pr.data);
+    });
+  });
+
+  var itDashboardBtnEl = itEl("itDashboardBtn");
+  if (itDashboardBtnEl) itDashboardBtnEl.addEventListener("click", itOpenDashboardModal);
+  var itDashboardCloseEl = itEl("itDashboardClose");
+  if (itDashboardCloseEl) itDashboardCloseEl.addEventListener("click", itCloseDashboardModal);
+  var itDashboardBackdropEl = itEl("itDashboardBackdrop");
+  if (itDashboardBackdropEl) itDashboardBackdropEl.addEventListener("click", function(ev){ if (ev.target === itDashboardBackdropEl) itCloseDashboardModal(); });
 
   boot();
   itCloudBoot();
