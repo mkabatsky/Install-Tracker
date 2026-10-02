@@ -4,6 +4,6 @@
 // Settings -> API). Only use the "anon" / "publishable" key here -
 // NEVER the "service_role" or "secret" key.
 window.ITDB_CLOUD = {
-  url: "https://kqsuxdkaxptuvlynhlob.supabase.co",
-  anonKey: "sb_publishable_QPx5n0mxj-zUnJy2K4fkGQ_I6HgZvbY"
+  url: "PASTE-YOUR-PROJECT-URL-HERE",       // looks like https://abcdefgh.supabase.co
+  anonKey: "PASTE-YOUR-ANON-OR-PUBLISHABLE-KEY-HERE"
 };

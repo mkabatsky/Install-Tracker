@@ -565,7 +565,8 @@
   .it-find-hit .fh-proj{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .it-find-hit button{flex:none;padding:7px 12px;font-size:13px;}
 
-  .it-project-list-head{display:flex;justify-content:flex-end;flex:none;margin-top:8px;}
+  .it-project-list-head{display:flex;gap:8px;flex-wrap:wrap;flex:none;margin-top:8px;}
+  .it-project-list-head input{flex:1;min-width:150px;border:1px solid var(--border);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--text);font:inherit;font-size:16px;}
   .it-project-new{display:flex;gap:8px;flex-wrap:wrap;flex:none;}
   .it-project-new input{flex:1;min-width:150px;border:1px solid var(--border);border-radius:8px;padding:9px 12px;background:var(--bg);color:var(--text);font:inherit;font-size:16px;}
   .it-project-list{display:flex;flex-direction:column;flex:1 1 auto;min-height:60px;overflow:auto;margin-top:8px;}
@@ -580,50 +581,80 @@
 
   .it-primary{background:var(--navy);color:#fff;border-color:var(--navy);}
 
+  .it-job-field{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:12px;}
+  .it-job-field input{font:inherit;font-size:16px;font-weight:400;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);}
+  .it-backup-note{font-size:12px;color:var(--text-muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
   @media (max-width:640px){
     .it-modal-panel{max-width:none;width:100%;max-height:100%;height:100%;border-radius:0;}
   }
 
-  /* =================== roles: viewer (read-only) =================== */
-  /* The real enforcement is server-side (RLS) and cloudNotify* being turned
-     into no-ops for this role (see it-roles.js) - this CSS just keeps the
-     screen from offering controls that would otherwise silently do nothing
-     or fail. */
+  /* =================== roles: PC / Viewer =================== */
+  /* role="viewer" covers two very different permission levels, told apart
+     by whether the account is locked to one project (see itApplyRoleUi in
+     it-roles.js for the full breakdown):
+       - PC (.it-role-viewer, NOT .it-locked-project): can browse/switch
+         projects and edit item/cable status same as staff, just no
+         project admin.
+       - Viewer (.it-role-viewer.it-locked-project): pinned to one project,
+         view/sort/PDF only, nothing else.
+     The real enforcement is server-side (RLS) and itc.readOnly gating
+     cloudNotify*/push (see it-roles.js/it-cloud.js) - this CSS just keeps
+     the screen from offering controls that would otherwise silently do
+     nothing or fail. */
   #itRoleBanner{display:none;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:5px 10px;border-radius:8px;background:var(--surface-2);color:var(--text-muted);}
   body.it-role-viewer #itRoleBanner{display:inline-flex;}
 
   /* only hide the Projects picker button when this account is pinned to one
-     project - an unlocked viewer can still browse and switch between
-     projects, same as staff, just read-only once inside one */
+     project - PC can still browse and switch between projects, same as
+     staff */
   body.it-locked-project #itProjectsBtn{display:none !important;}
 
-  /* an unlocked viewer can open the Projects list (to browse/switch) but
-     creating a project or deleting one there is still a write action */
+  /* PC can open the Projects list (to browse/switch) but creating a
+     project or deleting one there is still a write action reserved for
+     staff */
   body.it-role-viewer #itNewName, body.it-role-viewer #itNewBtn{display:none !important;}
   body.it-role-viewer .it-project-row button:not(.it-primary){display:none !important;}
 
-  /* top-toolbar actions that write data - BOM import and Load both replace
-     the whole item list. Export/PDF/Expand-all are read-only and stay. */
+  /* top-toolbar actions reserved for staff regardless of lock state - BOM
+     import/Load both replace the whole item list, and Manage users is
+     admin-only */
   body.it-role-viewer #bomBtn, body.it-role-viewer #loadBtn{display:none !important;}
   body.it-role-viewer #itManageUsersBtn{display:none !important;}
-  body.it-role-viewer #itDashboardBtn{display:none !important;}
-  body.it-role-viewer #itSubmitReportBtn{display:none !important;}
+
+  /* Dashboard and Submit are available to PC (needs Submit to be able to
+     send in the status updates its edits queue) - only a locked Viewer
+     loses them, since a locked Viewer can't edit anything to submit and
+     has no other projects to see in a fleet dashboard */
+  body.it-role-viewer.it-locked-project #itDashboardBtn{display:none !important;}
+  body.it-role-viewer.it-locked-project #itSubmitReportBtn{display:none !important;}
+  /* job name/address/number is a write action; a locked Viewer only views */
+  body.it-role-viewer.it-locked-project #itJobInfoBtn{display:none !important;}
+  /* not a write action, but still "no other functions" per the Viewer spec */
+  body.it-role-viewer.it-locked-project #itBackupFolderBtn,
+  body.it-role-viewer.it-locked-project #itBackupFolderNote{display:none !important;}
   /* dims and disables (rather than hides) once there's nothing queued, so
      it's still there as a reminder the feature exists */
   #itSubmitReportBtn:disabled{opacity:.5;cursor:default;}
 
+  /* Viewer tier only: "view, sort, and download PDF" means Excel export
+     and Save progress are removed entirely, not just locked behind a
+     disabled button */
+  body.it-role-viewer.it-locked-project #exportBtn,
+  body.it-role-viewer.it-locked-project #saveBtn{display:none !important;}
+
   /* everything inside the floor/room tree that lets you change data: the
      in-scope checkbox, status/cable dropdowns, and notes text, plus the
-     floor/room "mark installed" buttons */
-  body.it-role-viewer #floorList input,
-  body.it-role-viewer #floorList select,
-  body.it-role-viewer #floorList textarea,
-  body.it-role-viewer #floorList [data-action]{
+     floor/room "mark installed" buttons - locked Viewer only; PC can edit */
+  body.it-role-viewer.it-locked-project #floorList input,
+  body.it-role-viewer.it-locked-project #floorList select,
+  body.it-role-viewer.it-locked-project #floorList textarea,
+  body.it-role-viewer.it-locked-project #floorList [data-action]{
     pointer-events:none;
   }
-  body.it-role-viewer #floorList .note-toggle,
-  body.it-role-viewer #floorList .floor-actions,
-  body.it-role-viewer #floorList .room-actions{
+  body.it-role-viewer.it-locked-project #floorList .note-toggle,
+  body.it-role-viewer.it-locked-project #floorList .floor-actions,
+  body.it-role-viewer.it-locked-project #floorList .room-actions{
     display:none;
   }
 
@@ -641,7 +672,7 @@
      shorter row's items pack differently and drift out of alignment, but
      with fixed column tracks a short row just leaves its trailing columns
      empty instead of shifting anything. */
-  .it-mu-row{display:grid;grid-template-columns:minmax(130px,1fr) 150px 112px 55px 108px;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
+  .it-mu-row{display:grid;grid-template-columns:minmax(130px,1fr) 150px 112px 60px 55px 108px;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px;}
   .it-mu-row:last-child{border-bottom:none;}
   /* grid items default to min-width:auto, meaning a cell will refuse to
      shrink below its content's own natural width (e.g. "Delete login" at
@@ -656,6 +687,7 @@
   .it-mu-row button{padding:6px 6px;font-size:12.5px;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .it-mu-row .it-mu-save{visibility:hidden;}
   .it-mu-row.it-mu-dirty .it-mu-save{visibility:visible;}
+  .it-mu-notify{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-muted);white-space:nowrap;cursor:pointer;}
 
   @media (max-width:640px){
     .it-mu-row{grid-template-columns:1fr;row-gap:6px;}
@@ -673,23 +705,33 @@
   .it-mu-new-fields input, .it-mu-new-fields select{font:inherit;font-size:16px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);}
   .it-mu-new-fields label.it-mu-new-project{display:none;}
   .it-mu-new-fields label.it-mu-new-project.show{display:flex;}
+  .it-mu-notify-row{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:12px;cursor:pointer;}
+  .it-mu-notify-row input{width:auto;}
 
   @media (max-width:640px){
     .it-mu-new-fields{grid-template-columns:1fr;}
   }
 
   /* =================== projects dashboard (staff only) =================== */
-  .it-dashboard-panel{max-width:620px;}
-  .it-dash-list{max-height:480px;overflow:auto;display:flex;flex-direction:column;gap:10px;}
-  .it-dash-card{border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;background:var(--surface);}
-  .it-dash-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;}
-  .it-dash-name{font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;}
-  .it-dash-open-btn{padding:6px 12px;font-size:12.5px;}
+  /* Wide enough for 3 cards per row at a comfortable card width before the
+     grid wraps itself down to 2, then 1, on a narrower window - no media
+     query needed, auto-fill + minmax does that on its own. */
+  .it-dashboard-panel{max-width:960px;}
+  .it-dash-list{max-height:640px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;align-content:start;}
+  .it-dash-card{
+    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface);
+    cursor:pointer;text-align:left;font:inherit;color:inherit;
+  }
+  .it-dash-card:hover{border-color:var(--navy);box-shadow:var(--shadow);}
+  .it-dash-name{
+    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;margin-bottom:8px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
   /* reuses the exact same .overall/.pct/.overall-bar family the live
      per-project header already uses, so a project's card here looks
      identical to its own dashboard once opened - just without the
      surrounding card chrome (this already has its own) and a wider bar. */
-  .it-dash-card .overall{border:none;box-shadow:none;padding:0;background:transparent;}
+  .it-dash-card .overall{border:none;box-shadow:none;padding:0;background:transparent;pointer-events:none;}
   .it-dash-card .overall-bar{width:100%;}
   .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
   .it-dash-msg.bad{color:var(--danger);font-weight:600;}
@@ -717,6 +759,10 @@
         <span id="itRoleBanner"></span>
         <span class="it-cloud-user" id="itCloudUser"></span>
         <button class="tool-btn" id="itSubmitReportBtn" type="button" title="Send the status-update email now instead of waiting">Submit</button>
+        <button class="tool-btn" id="itJobInfoBtn" type="button">Job info</button>
+        <span class="it-backup-note" id="itJobInfoNote" title=""></span>
+        <span class="it-backup-note" id="itBackupFolderNote" title=""></span>
+        <button class="tool-btn" id="itBackupFolderBtn" type="button">Backup folder</button>
         <button class="tool-btn" id="itDashboardBtn" type="button">Dashboard</button>
         <button class="tool-btn" id="itManageUsersBtn" type="button">Manage users</button>
         <button class="tool-btn" id="itProjectsBtn" type="button">Projects</button>
@@ -826,10 +872,42 @@
       <button class="it-primary" id="itNewBtn" type="button">Create project</button>
     </div>
     <div class="it-project-list-head">
+      <input id="itProjectFilter" type="text" placeholder="Look up a project by name…" autocomplete="off">
       <button class="tool-btn" id="itShowArchivedBtn" type="button">Show archived projects</button>
     </div>
     <div class="it-project-list" id="itProjectList"></div>
     <div class="it-project-msg" id="itProjectMsg" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="it-modal-backdrop" id="itJobInfoBackdrop" hidden="">
+  <div class="it-modal-panel" role="dialog" aria-modal="true" aria-labelledby="itJobInfoTitle">
+    <div class="it-modal-head">
+      <h2 id="itJobInfoTitle">Job info</h2>
+      <button class="it-icon-btn" id="itJobInfoClose" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <p class="it-modal-sub">Shared with everyone signed in to this project.</p>
+    <label class="it-job-field">Job name<input id="itJobName" type="text" autocomplete="off" maxlength="200"></label>
+    <label class="it-job-field">Address<input id="itJobAddress" type="text" autocomplete="off" maxlength="300" placeholder="Street, city, state"></label>
+    <label class="it-job-field">Job number<input id="itJobNumber" type="text" autocomplete="off" maxlength="80"></label>
+    <div class="it-project-msg" id="itJobInfoMsg" aria-live="polite"></div>
+    <button class="it-primary" id="itJobInfoSaveBtn" type="button">Save</button>
+  </div>
+</div>
+
+<div class="it-modal-backdrop" id="itBackupFolderBackdrop" hidden="">
+  <div class="it-modal-panel" role="dialog" aria-modal="true" aria-labelledby="itBackupFolderTitle">
+    <div class="it-modal-head">
+      <h2 id="itBackupFolderTitle">Backup folder</h2>
+      <button class="it-icon-btn" id="itBackupFolderClose" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <p class="it-modal-sub">A reminder of where backups go on THIS device - paste your OneDrive folder's link or path. "Save progress", "Export Excel" and "Download PDF" already open a Save-As dialog so you can browse there yourself each time.</p>
+    <label class="it-job-field">OneDrive backups folder<input id="itBackupFolderInput" type="text" autocomplete="off" placeholder="https://... or C:\OneDrive\..."></label>
+    <button class="it-primary" id="itBackupFolderSaveBtn" type="button">Save</button>
   </div>
 </div>
 <div class="it-modal-backdrop" id="itManageUsersBackdrop" hidden="">
@@ -854,12 +932,13 @@
         <label>Role
           <select id="itMuNewRole">
             <option value="staff">Staff (full access)</option>
-            <option value="viewer-locked">Viewer - one project</option>
-            <option value="viewer-any">Viewer - all projects</option>
+            <option value="viewer-locked">Viewer - one project (view/sort/PDF only)</option>
+            <option value="viewer-any">PC - all projects</option>
           </select>
         </label>
         <label class="it-mu-new-project" id="itMuNewProjectWrap">Project<select id="itMuNewProject"></select></label>
       </div>
+      <label class="it-mu-notify-row"><input type="checkbox" id="itMuNewNotify"> Send status-update emails to this address</label>
       <button class="it-primary" id="itMuCreateBtn" type="button">Create user</button>
     </div>
   </div>
@@ -1667,6 +1746,37 @@
     if(projectName) setProjectName(projectName);
   }
 
+  // Like loadDataset, but for re-importing a BOM into a schedule that
+  // already has progress on it: items are matched to their predecessor by
+  // id (stable across reimports as long as room/line order in the sheet
+  // doesn't change - see roomsToItems) and keep their inScope/status/notes
+  // instead of being reset to defaults. A brand-new item (no predecessor)
+  // still gets normal defaults. Room cable status is left alone entirely
+  // (it's keyed by room, not by item, so it has nothing to "match" against
+  // and nothing to lose). This is what makes re-uploading an updated Excel
+  // schedule a progress *update* instead of a progress *wipe*.
+  function mergeDataset(items, projectName){
+    var prev = state.items;
+    state.items = {};
+    state.order = [];
+    state.expandedFloor = {};
+    state.expandedRoom = {};
+    items.forEach(function(it){
+      var old = prev[it.id];
+      var merged = withDefaults(it);
+      if(old){
+        merged.inScope = old.inScope;
+        merged.status = old.status;
+        merged.notes = old.notes;
+        if(old.updatedAt) merged.updatedAt = old.updatedAt;
+      }
+      state.items[it.id] = merged;
+      state.order.push(it.id);
+      ensureCable(it.roomKey);
+    });
+    if(projectName) setProjectName(projectName);
+  }
+
   var ITEM_BASE_FIELDS = ["id","floor","roomNumber","roomType","roomKey","roomIndexOnFloor","itemIndexInRoom","qty","mfr","model","description"];
   function baseItems(){
     return state.order.map(function(id){
@@ -1870,6 +1980,8 @@
       var fStats = computeStats(floorAllItems, f.rooms);
       var floorKey = String(f.floor);
       var isExpanded = q ? true : !!state.expandedFloor[floorKey];
+      var floorInScope = floorAllItems.filter(function(it){ return it.inScope; });
+      var floorAllInstalled = floorInScope.length > 0 && floorInScope.every(function(it){ return it.status === "installed"; });
 
       var floorEl = document.createElement("div");
       floorEl.className = "floor" + (isExpanded ? " expanded" : "");
@@ -1883,7 +1995,7 @@
         '<div class="floor-meta">' + f.rooms.length + ' rooms · ' + fStats.scoped + ' in scope' + (fStats.outOfScope ? ' · ' + fStats.outOfScope + ' out of scope' : '') + '</div></div>' +
         '<div class="floor-progress"><div class="track"><div class="fill" style="width:' + fStats.pct + '%"></div></div>' +
         '<span class="frac">' + fStats.installed + '/' + fStats.scoped + '</span></div>' +
-        '<div class="floor-actions"><button type="button" data-action="complete-floor">Mark floor installed</button></div>';
+        '<div class="floor-actions"><button type="button" data-action="complete-floor">' + (floorAllInstalled ? "Mark floor not installed" : "Mark floor installed") + '</button></div>';
 
       head.addEventListener("click", function(ev){
         if(ev.target.closest('[data-action="complete-floor"]')) return;
@@ -1892,7 +2004,7 @@
       });
       head.querySelector('[data-action="complete-floor"]').addEventListener("click", function(ev){
         ev.stopPropagation();
-        completeItems(floorAllItems);
+        if(floorAllInstalled) revertItems(floorAllItems); else completeItems(floorAllItems);
       });
       floorEl.appendChild(head);
 
@@ -1919,6 +2031,8 @@
     if(!visibleCableChecks) visibleCableChecks = CABLE_CHECKS;
     var rStats = computeStats(r.items, [r]);
     var isExpanded = q ? true : !!state.expandedRoom[r.key];
+    var roomInScope = r.items.filter(function(it){ return it.inScope; });
+    var roomAllInstalled = roomInScope.length > 0 && roomInScope.every(function(it){ return it.status === "installed"; });
 
     var roomEl = document.createElement("div");
     roomEl.className = "room" + (isExpanded ? " expanded" : "");
@@ -1931,7 +2045,7 @@
       '<div class="room-title"><h3>Room ' + escapeHtml(r.roomNumber) + '</h3><span class="room-type-badge">' + escapeHtml(r.roomType) + '</span></div>' +
       '<div class="room-progress"><div class="track"><div class="fill" style="width:' + rStats.pct + '%"></div></div>' +
       '<span class="frac">' + rStats.installed + '/' + rStats.scoped + '</span></div>' +
-      '<div class="room-actions"><button type="button" data-action="complete-room">Mark room installed</button></div>';
+      '<div class="room-actions"><button type="button" data-action="complete-room">' + (roomAllInstalled ? "Mark room not installed" : "Mark room installed") + '</button></div>';
 
     head.addEventListener("click", function(ev){
       if(ev.target.closest('[data-action="complete-room"]')) return;
@@ -1940,7 +2054,7 @@
     });
     head.querySelector('[data-action="complete-room"]').addEventListener("click", function(ev){
       ev.stopPropagation();
-      completeItems(r.items);
+      if(roomAllInstalled) revertItems(r.items); else completeItems(r.items);
     });
     roomEl.appendChild(head);
 
@@ -2136,6 +2250,17 @@
     render();
   }
 
+  // Undoes completeItems - lets "Mark floor/room installed" be clicked a
+  // second time to back out of an accidental bulk-complete, instead of
+  // having to open every line item and set it back to Not started one at a
+  // time.
+  function revertItems(items){
+    items.forEach(function(it){
+      if(it.inScope && it.status === "installed") updateItem(it.id, { status: "not_started" }, true);
+    });
+    render();
+  }
+
   function updateItem(id, patch, skipRender){
     var cur = state.items[id];
     if(!cur) return;
@@ -2201,13 +2326,36 @@
     }).join("\r\n");
   }
 
-  function downloadFile(filename, content, mime){
-    var blob = new Blob([content], { type: mime });
+  function downloadFileFallback(filename, blob){
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  }
+
+  // Uses the File System Access API's native Save-As picker when the
+  // browser supports it (desktop Chrome/Edge), so the person can pick
+  // exactly where this goes - e.g. a OneDrive-synced backups folder -
+  // every time, instead of it silently landing in the default Downloads
+  // folder. Falls back to the normal <a download> link everywhere else
+  // (Firefox, Safari, mobile/tablet browsers). Must be called directly
+  // from a click handler - showSaveFilePicker requires a user gesture.
+  function downloadFile(filename, content, mime){
+    var blob = new Blob([content], { type: mime });
+    if (!window.showSaveFilePicker){ downloadFileFallback(filename, blob); return; }
+    var ext = (filename.match(/\.[^.]+$/) || [""])[0];
+    window.showSaveFilePicker({
+      suggestedName: filename,
+      types: ext ? [{ description: mime, accept: (function(){ var a = {}; a[mime] = [ext]; return a; })() }] : undefined
+    }).then(function(handle){
+      return handle.createWritable().then(function(writable){
+        return writable.write(blob).then(function(){ return writable.close(); });
+      });
+    }).catch(function(e){
+      if (e && e.name === "AbortError") return; // user cancelled the picker - don't also auto-download
+      downloadFileFallback(filename, blob);
+    });
   }
 
   function exportCsv(){
@@ -3492,7 +3640,7 @@
   function bomCommit(){
     var res = buildImport();
     if(!res.rooms.length) return;
-    if(state.dirty && !confirm("The current schedule has unsaved progress. Replace it with this BOM anyway?")) return;
+    if(state.order.length && !confirm("This will update the schedule from this BOM. Items that match an existing line keep their progress; anything no longer in the file will be removed. Continue?")) return;
     var items = roomsToItems(res.rooms);
     var bomProjectName = imp.project || "Untitled project";
     var bomNote = "Loaded from " + imp.files.join(", ") + " on " + new Date().toLocaleDateString() + " — " + plural(res.rooms.length, "room") + ", " + plural(items.length, "line item") + ".";
@@ -3501,7 +3649,7 @@
       imp = null;
       return;
     }
-    loadDataset(items, bomProjectName);
+    mergeDataset(items, bomProjectName);
     setDataSourceNote(bomNote);
     state.dirty = true;
     updateFileLabel();
@@ -3657,10 +3805,11 @@
   var ITCLOUD = (window.ITDB_CLOUD && /^https?:\/\//.test(String(window.ITDB_CLOUD.url || "")) && window.ITDB_CLOUD.anonKey && !/^PASTE/.test(String(window.ITDB_CLOUD.anonKey))) ? window.ITDB_CLOUD : null;
   var itc = {
     on: false, sb: null, user: null, projectId: null, projectName: "", channel: null,
+    jobAddress: "", jobNumber: "", // extra job-info fields, synced the same way as projectName (see "job info" modal below)
     role: "staff", readOnly: false, // set by it-roles.js once the signed-in account's role is known
     syncedItems: new Map(),   // id -> {json, pos, ts}: what the server last confirmed
     syncedCable: new Map(),   // roomKey -> {json, ts}
-    metaBase: {},             // {projectName, dataSourceNote} the server last confirmed
+    metaBase: {},             // {projectName, dataSourceNote, jobAddress, jobNumber} the server last confirmed
     maxPos: 0, live: false, pushing: false, pushAgain: false, pulling: false, pullAgain: false,
     pushTimer: null, retryTimer: null, applyTimer: null, localSeed: null,
     clientId: "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
@@ -3737,6 +3886,8 @@
         name: itc.projectName,
         projectName: state.projectName,
         dataSourceNote: (itEl("dataSourceNote") || {}).textContent || "",
+        jobAddress: itc.jobAddress || "",
+        jobNumber: itc.jobNumber || "",
         items: baseItemsWithProgress(),
         cable: state.cable,
         metaBase: itc.metaBase,
@@ -3770,6 +3921,8 @@
       state.cable = c.cable || {};
       if (c.projectName) setProjectName(c.projectName);
       if (c.dataSourceNote) setDataSourceNote(c.dataSourceNote);
+      itc.jobAddress = c.jobAddress || "";
+      itc.jobNumber = c.jobNumber || "";
       itc.metaBase = c.metaBase || {};
       itc.maxPos = Number(c.maxPos) || 0;
       itc.syncedItems = new Map(c.syncedItems || []);
@@ -3864,8 +4017,6 @@
 
   function itMergeRemoteMeta(remoteMeta){
     var rm = remoteMeta || {};
-    var keys = {};
-    Object.keys({projectName: 1, dataSourceNote: 1}).concat(Object.keys(itc.metaBase)).forEach(function(k){ keys[k] = true; });
     if (state.projectName === (itc.metaBase.projectName || "")) {
       if (rm.projectName) setProjectName(rm.projectName);
     }
@@ -3873,7 +4024,20 @@
     if (curNote === (itc.metaBase.dataSourceNote || "")) {
       if (rm.dataSourceNote != null) setDataSourceNote(rm.dataSourceNote);
     }
-    itc.metaBase = {projectName: state.projectName, dataSourceNote: (itEl("dataSourceNote") || {}).textContent || ""};
+    if ((itc.jobAddress || "") === (itc.metaBase.jobAddress || "")) {
+      if (rm.jobAddress != null) itc.jobAddress = rm.jobAddress;
+    }
+    if ((itc.jobNumber || "") === (itc.metaBase.jobNumber || "")) {
+      if (rm.jobNumber != null) itc.jobNumber = rm.jobNumber;
+    }
+    itc.metaBase = {
+      projectName: state.projectName,
+      dataSourceNote: (itEl("dataSourceNote") || {}).textContent || "",
+      jobAddress: itc.jobAddress || "",
+      jobNumber: itc.jobNumber || ""
+    };
+    itRefreshJobInfoModal();
+    itRenderJobInfoNote();
   }
 
   function itApplyRemoteChanges(){
@@ -3891,6 +4055,21 @@
       remoteIds[r.id] = true;
       itMergeRemoteItem(r.id, r.data, r.pos, r.updated_at);
     });
+    // A pull that comes back with zero rows, despite this device having
+    // previously synced a nonzero number of items for this project, is
+    // treated as a suspicious/transient read rather than as proof every
+    // item was deleted elsewhere - a momentary empty result (no error,
+    // just nothing returned) must never be enough on its own to wipe a
+    // project's local copy AND persist that wipe into the cache (see
+    // itWriteCache below, via itApplyRemoteChanges). A genuine bulk
+    // deletion done by someone else still gets picked up correctly on the
+    // very next successful pull, once remoteRows actually reflects it.
+    if (!remoteRows.length && itc.syncedItems.size > 0){
+      itStatus("bad", "Sync returned no items for this project — not clearing anything. Retrying…");
+      clearTimeout(itc.retryTimer);
+      itc.retryTimer = setTimeout(itPullAll, 4000);
+      return;
+    }
     Array.from(itc.syncedItems.keys()).forEach(function(id){
       if (remoteIds[id]) return;
       var base = itc.syncedItems.get(id), local = state.items[id];
@@ -3992,7 +4171,7 @@
       }
     });
 
-    var metaNow = itCanon({projectName: state.projectName, dataSourceNote: (itEl("dataSourceNote") || {}).textContent || ""});
+    var metaNow = itCanon({projectName: state.projectName, dataSourceNote: (itEl("dataSourceNote") || {}).textContent || "", jobAddress: itc.jobAddress || "", jobNumber: itc.jobNumber || ""});
     var metaChanged = metaNow !== itCanon(itc.metaBase);
 
     if (!itemUpserts.length && !itemDeletes.length && !cableUpserts.length && !metaChanged){
@@ -4014,7 +4193,7 @@
       chain = chain.then(function(){ return sb.from("it_cable").upsert(row, {onConflict: "project_id,room_key"}).then(function(r){ if (r.error) throw r.error; }); });
     });
     if (metaChanged){
-      var metaCopy = {projectName: state.projectName, dataSourceNote: (itEl("dataSourceNote") || {}).textContent || ""};
+      var metaCopy = {projectName: state.projectName, dataSourceNote: (itEl("dataSourceNote") || {}).textContent || "", jobAddress: itc.jobAddress || "", jobNumber: itc.jobNumber || ""};
       chain = chain.then(function(){
         itc.projectName = state.projectName || itc.projectName || "Untitled project";
         return sb.from("it_projects").update({name: itc.projectName, meta: metaCopy, updated_by: itc.clientId}).eq("id", projectId).then(function(r){
@@ -4091,6 +4270,7 @@
     if (id) itLsDel(ITK.cache + id);
     itLsDel(ITK.lastProject);
     state.items = {}; state.order = []; state.cable = {}; setProjectName("");
+    itc.jobAddress = ""; itc.jobNumber = ""; itRenderJobInfoNote();
     render();
     itStatus("bad", "No project open");
     itShowProjects("That project was deleted. Pick another one.");
@@ -4135,13 +4315,18 @@
     itLsSet(ITK.lastProject, project.id);
     state.items = {}; state.order = []; state.cable = {};
     itc.syncedItems = new Map(); itc.syncedCable = new Map(); itc.metaBase = {}; itc.maxPos = 0;
+    itc.jobAddress = ""; itc.jobNumber = "";
     var cached = itLoadCache(project.id);
     if (!cached){
       var nm = (project.meta && project.meta.projectName) || project.name || "";
       setProjectName(nm);
       if (project.meta && project.meta.dataSourceNote) setDataSourceNote(project.meta.dataSourceNote);
-      itc.metaBase = {projectName: nm, dataSourceNote: (project.meta && project.meta.dataSourceNote) || ""};
+      itc.jobAddress = (project.meta && project.meta.jobAddress) || "";
+      itc.jobNumber = (project.meta && project.meta.jobNumber) || "";
+      itc.metaBase = {projectName: nm, dataSourceNote: (project.meta && project.meta.dataSourceNote) || "", jobAddress: itc.jobAddress, jobNumber: itc.jobNumber};
     }
+    itRefreshJobInfoModal();
+    itRenderJobInfoNote();
     state.search = ""; var si = itEl("searchInput"); if (si) si.value = "";
     render();
     itIsDirty = false;
@@ -4171,15 +4356,21 @@
   function itDeepLinkProjectId(){
     try{ return new URLSearchParams(location.search).get("project") || null; }catch(e){ return null; }
   }
+  // What to show once sign-in finishes and there's no project to deep-link
+  // straight into - the plain Projects list by default; it-roles.js points
+  // this at the fleet Dashboard instead (the "cover page" every staff/PC
+  // login should land on - see itResumeFallback in it-roles.js), without
+  // this file needing to know that Dashboard exists.
+  var itResumeFallback = itResumeShowList;
   function itResume(){
     var deepLinkId = itDeepLinkProjectId();
     if (deepLinkId){
       return itc.sb.from("it_projects").select("id,name,meta").eq("id", deepLinkId).maybeSingle().then(function(r){
         if (r.data && !r.error) return itOpenProject(r.data);
-        return itResumeShowList();
-      }).catch(itResumeShowList);
+        return itResumeFallback();
+      }).catch(itResumeFallback);
     }
-    return itResumeShowList();
+    return itResumeFallback();
   }
   function itResumeShowList(){
     return itc.sb.from("it_projects").select("id,name,meta,updated_at").eq("deleted", false).eq("archived", false).order("updated_at", {ascending: false}).then(function(r){
@@ -4209,15 +4400,29 @@
     itEl("itProjectsBackdrop").hidden = false;
     itEl("itFindInput").value = "";
     itEl("itFindResults").innerHTML = "";
+    var filterEl = itEl("itProjectFilter");
+    if (filterEl) filterEl.value = "";
     itProjectMsg(message || "");
     itRenderProjectList();
+  }
+  // Cached so typing in "Look up a project by name" re-filters instantly
+  // without a round trip - the list itself (which projects exist) only
+  // actually changes on open/archive-toggle/create/delete, all of which
+  // already re-fetch via itRenderProjectList.
+  var itProjectsCache = [];
+  function itApplyProjectFilter(projects){
+    var filterEl = itEl("itProjectFilter");
+    var term = (filterEl && filterEl.value || "").trim().toLowerCase();
+    if (!term) return projects;
+    return projects.filter(function(p){ return (p.name || "").toLowerCase().indexOf(term) !== -1; });
   }
   function itRenderProjectList(){
     var list = itEl("itProjectList");
     list.textContent = "Loading...";
     return itc.sb.from("it_projects").select("id,name,meta,updated_at,archived").eq("deleted", false).eq("archived", itShowArchived).order("updated_at", {ascending: false}).then(function(r){
       if (r.error) throw r.error;
-      itDrawProjects(r.data || []);
+      itProjectsCache = r.data || [];
+      itDrawProjects(itApplyProjectFilter(itProjectsCache));
     }).catch(function(){
       var projects = [];
       try{
@@ -4229,16 +4434,21 @@
           }
         }
       }catch(e){}
-      itDrawProjects(projects, true);
+      itProjectsCache = projects;
+      itDrawProjects(itApplyProjectFilter(projects), true);
     });
   }
   function itDrawProjects(projects, offline){
     var list = itEl("itProjectList");
     list.textContent = "";
     if (!projects.length){
+      var filterEl = itEl("itProjectFilter");
+      var filtering = filterEl && filterEl.value.trim();
       var empty = document.createElement("div");
       empty.className = "it-project-msg";
-      empty.textContent = offline ? "You're offline and no projects are saved on this device." : (itShowArchived ? "No archived projects." : "No projects yet.");
+      empty.textContent = offline ? "You're offline and no projects are saved on this device."
+        : filtering ? "No project names match \"" + filterEl.value.trim() + "\"."
+        : (itShowArchived ? "No archived projects." : "No projects yet.");
       list.appendChild(empty);
       return;
     }
@@ -4391,6 +4601,97 @@
     });
   }
 
+  // ----- job info modal (name/address/job number - shared per project) -----
+  function itJobInfoMsg(text, bad){
+    var m = itEl("itJobInfoMsg");
+    if (!m) return;
+    m.textContent = text || "";
+    m.className = "it-project-msg" + (bad ? " bad" : "");
+  }
+  function itOpenJobInfoModal(){
+    if (!itc.projectId) return;
+    itEl("itJobName").value = state.projectName || "";
+    itEl("itJobAddress").value = itc.jobAddress || "";
+    itEl("itJobNumber").value = itc.jobNumber || "";
+    itJobInfoMsg("");
+    itEl("itJobInfoBackdrop").hidden = false;
+  }
+  function itCloseJobInfoModal(){ var b = itEl("itJobInfoBackdrop"); if (b) b.hidden = true; }
+  function itRenderJobInfoNote(){
+    var note = itEl("itJobInfoNote");
+    if (!note) return;
+    var bits = [itc.jobNumber, itc.jobAddress].filter(Boolean);
+    note.textContent = bits.join(" · ");
+    note.title = bits.join(" · ");
+  }
+  // Keeps the open modal showing current values if someone else changes
+  // the job info while it's open (same idea as the rest of this file -
+  // live sync, not just on open).
+  function itRefreshJobInfoModal(){
+    var backdrop = itEl("itJobInfoBackdrop");
+    if (!backdrop || backdrop.hidden) return;
+    itEl("itJobName").value = state.projectName || "";
+    itEl("itJobAddress").value = itc.jobAddress || "";
+    itEl("itJobNumber").value = itc.jobNumber || "";
+  }
+  var itJobInfoBtnEl = itEl("itJobInfoBtn");
+  if (itJobInfoBtnEl) itJobInfoBtnEl.addEventListener("click", itOpenJobInfoModal);
+  var itJobInfoCloseEl = itEl("itJobInfoClose");
+  if (itJobInfoCloseEl) itJobInfoCloseEl.addEventListener("click", itCloseJobInfoModal);
+  var itJobInfoBackdropEl = itEl("itJobInfoBackdrop");
+  if (itJobInfoBackdropEl) itJobInfoBackdropEl.addEventListener("click", function(ev){ if (ev.target === itJobInfoBackdropEl) itCloseJobInfoModal(); });
+  var itJobInfoSaveBtnEl = itEl("itJobInfoSaveBtn");
+  if (itJobInfoSaveBtnEl) itJobInfoSaveBtnEl.addEventListener("click", function(){
+    if (!itc.projectId) return;
+    setProjectName(itEl("itJobName").value);
+    itc.jobAddress = itEl("itJobAddress").value;
+    itc.jobNumber = itEl("itJobNumber").value;
+    state.dirty = true;
+    updateFileLabel();
+    itNotifyProjectMetaChanged();
+    itRenderJobInfoNote();
+    render();
+    itJobInfoMsg("Saved.");
+    setTimeout(itCloseJobInfoModal, 500);
+  });
+
+  // ----- OneDrive backup-folder reminder (per-device, not synced) -----
+  // Just a stored link/path shown next to the export buttons as a
+  // reminder of where backups go - "Save progress"/"Export Excel"/
+  // "Download PDF" already prompt a real Save-As dialog (see downloadFile
+  // in the base app) so the person can navigate to this folder themselves
+  // every time. This is local to the browser on purpose: different staff
+  // may have their OneDrive synced to a different local path anyway.
+  function itLoadBackupPrefs(){
+    try{ return JSON.parse(itLsGet(ITK.prefs) || "{}") || {}; }catch(e){ return {}; }
+  }
+  function itSaveBackupPrefs(p){ itLsSet(ITK.prefs, JSON.stringify(p)); }
+  function itRenderBackupFolderNote(){
+    var note = itEl("itBackupFolderNote");
+    if (!note) return;
+    var folder = itLoadBackupPrefs().backupFolder || "";
+    note.textContent = folder ? ("Backups to: " + folder) : "";
+    note.title = folder;
+  }
+  function itOpenBackupFolderModal(){
+    itEl("itBackupFolderInput").value = itLoadBackupPrefs().backupFolder || "";
+    itEl("itBackupFolderBackdrop").hidden = false;
+  }
+  function itCloseBackupFolderModal(){ var b = itEl("itBackupFolderBackdrop"); if (b) b.hidden = true; }
+  var itBackupFolderBtnEl = itEl("itBackupFolderBtn");
+  if (itBackupFolderBtnEl) itBackupFolderBtnEl.addEventListener("click", itOpenBackupFolderModal);
+  var itBackupFolderCloseEl = itEl("itBackupFolderClose");
+  if (itBackupFolderCloseEl) itBackupFolderCloseEl.addEventListener("click", itCloseBackupFolderModal);
+  var itBackupFolderBackdropEl = itEl("itBackupFolderBackdrop");
+  if (itBackupFolderBackdropEl) itBackupFolderBackdropEl.addEventListener("click", function(ev){ if (ev.target === itBackupFolderBackdropEl) itCloseBackupFolderModal(); });
+  var itBackupFolderSaveBtnEl = itEl("itBackupFolderSaveBtn");
+  if (itBackupFolderSaveBtnEl) itBackupFolderSaveBtnEl.addEventListener("click", function(){
+    itSaveBackupPrefs({backupFolder: itEl("itBackupFolderInput").value.trim()});
+    itRenderBackupFolderNote();
+    itCloseBackupFolderModal();
+  });
+  itRenderBackupFolderNote();
+
   // ----- wiring -----
   function itWireUi(){
     var newName = itEl("itNewName");
@@ -4406,6 +4707,10 @@
       ev.target.textContent = itShowArchived ? "Show active projects" : "Show archived projects";
       itProjectMsg("");
       itRenderProjectList();
+    });
+    var projectFilterEl = itEl("itProjectFilter");
+    if (projectFilterEl) projectFilterEl.addEventListener("input", function(){
+      itDrawProjects(itApplyProjectFilter(itProjectsCache));
     });
     var findInput = itEl("itFindInput");
     itEl("itFindBtn").addEventListener("click", itCrossProjectSearch);
@@ -4543,29 +4848,46 @@
     });
   }
 
-  // ---------- roles: viewer (read-only, optionally locked to one project) ----------
-  // Same idea as the Equipment Database's viewer role: the real security
-  // boundary is server-side RLS (see supabase-setup-it-roles.sql) - this
-  // file just keeps the screen from offering controls that would otherwise
-  // silently do nothing or fail.
-
+  // ---------- roles: Staff / PC / Viewer ----------
+  // Same idea as the Equipment Database's roles: the real security boundary
+  // is server-side RLS (see supabase-setup-it-roles.sql) - this file just
+  // keeps the screen from offering controls that would otherwise silently
+  // do nothing or fail. The database only knows role="staff" or
+  // role="viewer" plus an optional project_id - "PC" is just the viewer
+  // role with no project_id, told apart in the UI by the `locked` flag.
+  //
   // `locked` = true when this account is pinned to one specific project (the
   // Projects button/picker makes no sense then, since there's nothing else
-  // to switch to). A viewer with no project assigned is NOT locked - they
-  // behave like staff for navigation (pick any project) but read-only once
-  // inside one.
+  // to switch to). That same flag is what separates the two very different
+  // permission levels that both happen to be role="viewer":
+  //  - PC (role=viewer, no project_id, locked=false): can open/switch
+  //    between any project, edit item/cable status and notes, mark
+  //    floors/rooms installed, and submit the status-change email - same
+  //    navigation and editing as staff, just no project admin (can't
+  //    create/delete/archive a project, Load BOM, or manage users).
+  //  - Viewer (role=viewer, project_id set, locked=true): pinned to one
+  //    project, and can ONLY view/sort/search it and download the PDF -
+  //    no edits of any kind, and Excel export / Save progress are removed
+  //    entirely (see it-roles.css).
   function itApplyRoleUi(role, locked){
     document.body.classList.remove("it-role-viewer", "it-locked-project");
-    itc.readOnly = role === "viewer";
+    itc.readOnly = role === "viewer" && locked;
     if (role === "viewer"){
       document.body.classList.add("it-role-viewer");
       if (locked) document.body.classList.add("it-locked-project");
     }
     var banner = itEl("itRoleBanner");
     if (banner){
-      banner.textContent = role === "viewer" ? (locked ? "Viewer — read only" : "Viewer — read only (all projects)") : "";
+      banner.textContent = role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
     }
   }
+
+  // The cover page after sign-in: staff and PC land on the fleet Dashboard
+  // (so they can see every project's status before picking one) instead of
+  // the plain Projects list. A locked Viewer never reaches this at all -
+  // itRolesResume below sends them straight into their one assigned
+  // project, which is the only thing there is for them to see.
+  itResumeFallback = itOpenDashboardModal;
 
   var itLegacyResume = itResume;
   function itRolesResume(){
@@ -4825,8 +5147,8 @@
           '<span class="it-mu-email">' + escapeHtml(u.email) + '</span>' +
           '<select class="it-mu-role">' +
             '<option value="staff"' + (kind === "staff" ? " selected" : "") + '>Staff (full access)</option>' +
-            '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project</option>' +
-            '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>Viewer - all projects</option>' +
+            '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project (view/sort/PDF only)</option>' +
+            '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>PC - all projects</option>' +
           '</select>' +
           /* visibility, not display:none - a display:none child is removed
              from grid layout entirely, which would shift Save/Delete left
@@ -4834,6 +5156,7 @@
              visibility:hidden keeps its grid cell (and so the columns after
              it) exactly where they belong, just invisible. */
           '<select class="it-mu-project" style="' + (projShown ? "" : "visibility:hidden") + '">' + itMuProjectOptionsHtml(u.projectId) + '</select>' +
+          '<label class="it-mu-notify" title="Send status-update emails to this address"><input type="checkbox" class="it-mu-notify-chk"' + (u.notifyEmail ? " checked" : "") + '> Email</label>' +
           '<button type="button" class="it-mu-save it-primary">Save</button>' +
           '<button type="button" class="it-mu-delete">Delete login</button>' +
         '</div>'
@@ -4846,6 +5169,7 @@
       id: rowEl.getAttribute("data-id"),
       roleSel: rowEl.querySelector(".it-mu-role"),
       projectSel: rowEl.querySelector(".it-mu-project"),
+      notifyChk: rowEl.querySelector(".it-mu-notify-chk"),
       saveBtn: rowEl.querySelector(".it-mu-save"),
     };
   }
@@ -4873,6 +5197,7 @@
     itEl("itMuNewName").value = "";
     itEl("itMuNewRole").value = "staff";
     itEl("itMuNewProjectWrap").classList.remove("show");
+    var notifyChk = itEl("itMuNewNotify"); if (notifyChk) notifyChk.checked = false;
     itLoadMuList();
   }
   function itCloseManageUsersModal(){ itEl("itManageUsersBackdrop").hidden = true; }
@@ -4887,7 +5212,7 @@
       var projSel = rowEl.querySelector(".it-mu-project");
       projSel.style.visibility = itMuKindNeedsProject(kind) ? "" : "hidden";
     }
-    if (ev.target.classList.contains("it-mu-role") || ev.target.classList.contains("it-mu-project")){
+    if (ev.target.classList.contains("it-mu-role") || ev.target.classList.contains("it-mu-project") || ev.target.classList.contains("it-mu-notify-chk")){
       rowEl.classList.add("it-mu-dirty");
     }
   });
@@ -4902,7 +5227,7 @@
       if (itMuKindNeedsProject(kind) && !rp.projectId){ itMuMsg("Pick a project for that role first.", "bad"); return; }
       saveBtn.disabled = true;
       itMuMsg("Saving...");
-      itInvokeFn("it-admin-users", {action: "setRole", userId: f.id, role: rp.role, projectId: rp.projectId}).then(function(res){
+      itInvokeFn("it-admin-users", {action: "setRole", userId: f.id, role: rp.role, projectId: rp.projectId, notifyEmail: !!(f.notifyChk && f.notifyChk.checked)}).then(function(res){
         saveBtn.disabled = false;
         if (res.error){ itMuMsg("Couldn't save: " + res.error.message, "bad"); return; }
         var data = res.data || {};
@@ -4956,7 +5281,8 @@
 
     itMuCreateBtnEl.disabled = true;
     itMuMsg("Creating...");
-    itInvokeFn("it-admin-users", {action: "createUser", email: email, password: password, displayName: displayName, role: rp.role, projectId: rp.projectId}).then(function(res){
+    var notifyEmailChk = itEl("itMuNewNotify");
+    itInvokeFn("it-admin-users", {action: "createUser", email: email, password: password, displayName: displayName, role: rp.role, projectId: rp.projectId, notifyEmail: !!(notifyEmailChk && notifyEmailChk.checked)}).then(function(res){
       itMuCreateBtnEl.disabled = false;
       if (res.error){ itMuMsg("Couldn't create: " + res.error.message, "bad"); return; }
       var data = res.data || {};
@@ -4965,6 +5291,7 @@
       itEl("itMuNewEmail").value = "";
       itEl("itMuNewPassword").value = "";
       itEl("itMuNewName").value = "";
+      if (notifyEmailChk) notifyEmailChk.checked = false;
       itLoadMuList();
     }).catch(function(e){
       itMuCreateBtnEl.disabled = false;
@@ -5087,9 +5414,8 @@
       var p = c.project, s = c.stats;
       var pMeta = p.meta || {};
       var name = pMeta.projectName || p.name || "Untitled project";
-      return '<div class="it-dash-card">' +
-        '<div class="it-dash-card-head"><span class="it-dash-name">' + escapeHtml(name) + '</span>' +
-          '<button type="button" class="it-dash-open-btn" data-itd-open="' + p.id + '">Open</button></div>' +
+      return '<button type="button" class="it-dash-card" data-itd-open="' + p.id + '" title="' + escapeHtml(name) + ' - click to open">' +
+        '<div class="it-dash-name">' + escapeHtml(name) + '</div>' +
         '<div class="overall">' +
           '<div><div class="pct mono">' + s.pct + '%</div><div class="pct-label">installed</div></div>' +
           '<div class="overall-bar"><div class="track"><div class="fill" style="width:' + s.pct + '%"></div></div>' +
@@ -5102,7 +5428,7 @@
             '<span class="cable-count"><b>' + s.cableTested + ' / ' + s.cableTotalRooms + '</b> rooms cable tested</span>' +
           '</div>' +
         '</div>' +
-      '</div>';
+      '</button>';
     }).join("");
   }
 
@@ -5137,7 +5463,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, mergeDataset: mergeDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
