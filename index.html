@@ -681,6 +681,10 @@
   /* tech sees the list but can't add assets or mark one returned - those
      are staff-only actions */
   body.role-tech #assetsNewForm, body.role-tech .asset-return-btn{display:none !important;}
+  /* same idea for the fuller Asset Audit page: an unlocked tech can view,
+     search, and export, but add/edit/delete/import stay staff-only. */
+  body.role-tech #assetAuditAddBtn, body.role-tech #assetAuditImportBtn,
+  body.role-tech .asset-audit-edit, body.role-tech .asset-audit-delete{display:none !important;}
 
   /* =================== delivery request modal =================== */
   .modal-backdrop#deliveryRequestBackdrop[hidden]{display:none;}
@@ -770,27 +774,42 @@
   /* =================== jobs dashboard (staff only) =================== */
   .modal-backdrop#jobsDashboardBackdrop[hidden]{display:none;}
   /* wide enough for a 3-column grid (the "3 x 8" layout asked for) before
-     auto-fill wraps down to 2, then 1, on a narrower window - and tall
-     enough that a typical active-job count fits without scrolling at all;
-     overflow:auto is just a safety net past that, not the normal case */
+     auto-fill wraps down to 2, then 1, on a narrower window - matches
+     Install Tracker's own dashboard grid width so both apps' "projects
+     dashboard" feel like the same product. */
   .jobs-dashboard-panel{width:1320px;max-width:96vw;}
-  .jd-deliveries:empty{display:none;}
+  /* three sections (Projects / Scheduled deliveries / Deployed assets) all
+     scroll together as one body, instead of each section having its own
+     separately-capped scroll area. */
+  .jd-body{max-height:80vh;overflow:auto;display:flex;flex-direction:column;gap:18px;}
+  .jd-section-title{margin:0 0 8px;font-size:13.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-muted);}
+  .jd-deliveries:empty, .jd-assets-deployed:empty{display:none;}
   .jd-deliveries-title{margin:0 0 8px;font-size:13.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-muted);}
-  .jd-deliveries-list{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+  .jd-deliveries-list{display:flex;flex-direction:column;gap:6px;}
   .jd-delivery-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:13px;background:var(--surface-alt);}
   .jd-delivery-job{font-weight:700;flex:1 1 auto;min-width:120px;}
   .jd-delivery-driver{color:var(--ink-muted);}
   .jd-delivery-when{color:#8a5a00;font-weight:600;white-space:nowrap;}
-  .jd-list{max-height:82vh;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;align-content:start;}
+  .jd-list{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;align-content:start;}
   .jd-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
   .jd-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
   .jd-job{font-weight:700;}
   .jd-address{font-size:12.5px;color:var(--ink-muted);margin:2px 0 8px;}
-  .jd-stats{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--ink-muted);}
-  .jd-stat b{color:var(--ink);font-weight:700;}
-  .jd-stat.jd-open-requests b{color:#8a5a00;}
   .jd-open-btn{padding:6px 11px;font-size:12.5px;}
   .jd-msg{font-size:13px;color:var(--ink-muted);min-height:18px;}
+  /* percent + progress bar + stat counts, styled like Install Tracker's own
+     project-dashboard cards (same mono percent over a track/fill bar) so
+     both apps' dashboards read as the same product. */
+  .jd-overall{display:flex;align-items:center;gap:12px;}
+  .jd-pct-wrap{flex:none;text-align:center;}
+  .jd-pct{font-size:22px;font-weight:600;line-height:1;color:var(--accent);}
+  .jd-pct-label{font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
+  .jd-bar-wrap{flex:1 1 auto;min-width:0;}
+  .jd-track{height:7px;border-radius:5px;background:var(--surface-alt);overflow:hidden;}
+  .jd-fill{height:100%;border-radius:5px;background:var(--success);transition:width .35s ease;}
+  .jd-counts{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:7px;font-size:12px;color:var(--ink-muted);}
+  .jd-counts b{color:var(--ink);font-weight:700;}
+  .jd-counts .jd-open-requests b{color:#8a5a00;}
 
   /* =================== transfer to another job (staff only) =================== */
   .modal-backdrop#transferBackdrop[hidden]{display:none;}
@@ -838,6 +857,41 @@
   .assets-msg{font-size:13px;color:var(--ink-muted);min-height:18px;margin-top:8px;}
   .assets-msg.bad{color:var(--danger);font-weight:600;}
   .assets-msg.good{color:var(--success);font-weight:600;}
+
+  /* =================== asset audit (full review/audit page) =================== */
+  .modal-backdrop#assetAuditBackdrop[hidden]{display:none;}
+  .asset-audit-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center;}
+  .asset-audit-toolbar input[type="search"]{flex:1 1 220px;min-width:160px;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);}
+  .asset-audit-toolbar select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);}
+  .asset-audit-toolbar button{padding:8px 12px;font-size:13px;white-space:nowrap;}
+  .asset-audit-table-wrap{max-height:62vh;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+  .asset-audit-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .asset-audit-table th, .asset-audit-table td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
+  .asset-audit-table th{position:sticky;top:0;background:var(--surface-alt);z-index:1;}
+  .asset-audit-table td.asset-audit-desc{white-space:normal;max-width:220px;}
+  .asset-audit-table tr:last-child td{border-bottom:none;}
+  .asset-audit-table .asset-audit-actions{display:flex;gap:6px;flex-wrap:nowrap;}
+  .asset-audit-table .asset-audit-actions button{padding:5px 9px;font-size:12px;}
+  .asset-audit-table .asset-audit-actions .asset-audit-delete{color:var(--danger);border-color:var(--danger);}
+
+  /* =================== asset add/edit modal (shared by both) =================== */
+  .modal-backdrop#assetEditBackdrop[hidden]{display:none;}
+  .asset-edit-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:14px;}
+  .asset-edit-fields .field-wide{grid-column:1 / -1;}
+  .asset-edit-fields label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--ink-muted);}
+  .asset-edit-fields input{font:inherit;font-size:16px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);}
+
+  /* =================== asset checkout history modal =================== */
+  .modal-backdrop#assetHistoryBackdrop[hidden]{display:none;}
+  .asset-history-list{max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px;}
+  .asset-history-row{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px;}
+  .asset-history-row .ahr-job{font-weight:700;}
+  .asset-history-row .ahr-line{color:var(--ink-muted);margin-top:2px;}
+  .asset-history-empty{font-size:13px;color:var(--ink-muted);}
+
+  @media (max-width:820px){
+    .asset-edit-fields{grid-template-columns:1fr;}
+  }
 
   /* =================== driver role: a totally different, full-screen
      dashboard instead of the equipment app - nothing below matters until
@@ -1229,8 +1283,14 @@
       </button>
     </div>
     <p class="modal-sub">Full-access staff only. Every active job's progress at a glance, busiest first.</p>
-    <div class="jd-deliveries" id="jdDeliveries"></div>
-    <div class="jd-list" id="jdList"></div>
+    <div class="jd-body" id="jdBody">
+      <div class="jd-section">
+        <h3 class="jd-section-title">Projects</h3>
+        <div class="jd-list" id="jdList"></div>
+      </div>
+      <div class="jd-deliveries" id="jdDeliveries"></div>
+      <div class="jd-assets-deployed" id="jdAssetsDeployed"></div>
+    </div>
     <div class="jd-msg" id="jdMsg" aria-live="polite"></div>
   </div>
 </div>
@@ -1316,12 +1376,12 @@
 <div class="modal-backdrop" id="assetsBackdrop" hidden="">
   <div class="modal-panel packing-slip-modal-panel" role="dialog" aria-modal="true" aria-labelledby="assetsTitle">
     <div class="modal-head">
-      <h2 id="assetsTitle">Assets</h2>
+      <h2 id="assetsTitle">Select assets</h2>
       <button class="icon-btn" id="assetsCloseBtn" title="Close" aria-label="Close" type="button">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
       </button>
     </div>
-    <p class="modal-sub" id="assetsSub">Full-access staff only (view-only for Tech - all jobs). Shared pool, reused across every job.</p>
+    <p class="modal-sub" id="assetsSub">Check the assets going out with this delivery, then Use selected.</p>
     <div class="assets-new" id="assetsNewForm">
       <input type="text" id="assetNewLabel" placeholder="Label (e.g. Pelican case #4)">
       <input type="text" id="assetNewCategory" placeholder="Category (optional)">
@@ -1336,6 +1396,75 @@
     <div class="modal-actions" id="assetsPickerActions" hidden="">
       <button class="primary" id="assetsUseSelectedBtn" type="button">Use selected</button>
     </div>
+  </div>
+</div>
+
+<!-- ================= asset audit (house inventory - full review) ================= -->
+<div class="modal-backdrop" id="assetAuditBackdrop" hidden="">
+  <div class="modal-panel packing-slip-modal-panel jobs-dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="assetAuditTitle">
+    <div class="modal-head">
+      <h2 id="assetAuditTitle">Assets</h2>
+      <button class="icon-btn" id="assetAuditCloseBtn" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <p class="modal-sub">Full-access staff only (view-only for Tech - all jobs). Search, filter, and audit the shared asset pool.</p>
+    <div class="asset-audit-toolbar">
+      <input type="search" id="assetAuditSearch" placeholder="Search label, barcode, make, model...">
+      <select id="assetAuditStatusFilter">
+        <option value="all">All statuses</option>
+        <option value="available">Available</option>
+        <option value="out">Checked out</option>
+      </select>
+      <select id="assetAuditCategoryFilter"><option value="">All categories</option></select>
+      <button type="button" id="assetAuditAddBtn">+ Add asset</button>
+      <button type="button" id="assetAuditExportBtn">Download spreadsheet</button>
+      <button type="button" id="assetAuditImportBtn">Upload spreadsheet</button>
+      <input type="file" id="assetAuditImportFile" accept=".xlsx,.xls" hidden="">
+    </div>
+    <div class="asset-audit-table-wrap">
+      <table class="asset-audit-table">
+        <thead><tr><th>Label</th><th>Category</th><th>BarCode</th><th>Make</th><th>Model</th><th>Description</th><th>Status</th><th>Assigned job</th><th></th></tr></thead>
+        <tbody id="assetAuditBody"></tbody>
+      </table>
+    </div>
+    <div class="assets-msg" id="assetAuditMsg" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="assetEditBackdrop" hidden="">
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="assetEditTitle">
+    <div class="modal-head">
+      <h2 id="assetEditTitle">Add asset</h2>
+      <button class="icon-btn" id="assetEditCloseBtn" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <div class="asset-edit-fields">
+      <label>Label<input type="text" id="assetEditLabel"></label>
+      <label>Category<input type="text" id="assetEditCategory"></label>
+      <label>BarCode<input type="text" id="assetEditBarcode"></label>
+      <label>Make<input type="text" id="assetEditManufacturer"></label>
+      <label>Model<input type="text" id="assetEditModel"></label>
+      <label class="field-wide">Description<input type="text" id="assetEditDescription"></label>
+      <label class="field-wide">Notes<input type="text" id="assetEditNotes"></label>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" id="assetEditSaveBtn" type="button">Add asset</button>
+    </div>
+    <div class="assets-msg" id="assetEditMsg" aria-live="polite"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="assetHistoryBackdrop" hidden="">
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="assetHistoryTitle">
+    <div class="modal-head">
+      <h2 id="assetHistoryTitle">Checkout history</h2>
+      <button class="icon-btn" id="assetHistoryCloseBtn" title="Close" aria-label="Close" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
+    </div>
+    <div class="asset-history-list" id="assetHistoryList"></div>
   </div>
 </div>
 <div id="packingSlipPrintRoot"><div id="packingSlipPrintDoc"></div></div>
@@ -6959,8 +7088,8 @@
   }
 
   // One query per table across EVERY job, aggregated client-side, rather
-  // than one query per job - keeps this to 3 requests total regardless of
-  // how many jobs exist.
+  // than one query per job - keeps this to a small fixed number of
+  // requests regardless of how many jobs exist.
   function loadJobsDashboard(){
     var list = cloudEl("jdList");
     list.textContent = "Loading...";
@@ -6971,10 +7100,14 @@
       cloud.sb.from("eq_delivery_requests").select("job_id").eq("status", "submitted"),
       cloud.sb.from("eq_deliveries").select("*, eq_jobs(id,name,meta)").eq("status", "assigned")
         .order("scheduled_date", {ascending: true}).order("scheduled_time", {ascending: true}),
-      invokeFn("admin-users", {action: "list"}).catch(function(){ return null; })
+      invokeFn("admin-users", {action: "list"}).catch(function(){ return null; }),
+      cloud.sb.from("eq_assets").select("id,label").eq("deleted", false),
+      cloud.sb.from("eq_asset_checkouts").select("*")
     ]).then(function(results){
-      var jobsRes = results[0], rowsRes = results[1], reqsRes = results[2], deliveriesRes = results[3], usersRes = results[4];
+      var jobsRes = results[0], rowsRes = results[1], reqsRes = results[2], deliveriesRes = results[3],
+          usersRes = results[4], assetsRes = results[5], checkoutsRes = results[6];
       if (jobsRes.error){ jdMsg("Couldn't load: " + jobsRes.error.message, "bad"); list.textContent = ""; return; }
+      var jobs = jobsRes.data || [];
       var rowsByJob = {}, openReqByJob = {};
       (rowsRes.data || []).forEach(function(r){
         (rowsByJob[r.job_id] = rowsByJob[r.job_id] || []).push(r);
@@ -6985,8 +7118,14 @@
       var driverEmailById = {};
       var users = (usersRes && usersRes.data && usersRes.data.users) || [];
       users.forEach(function(u){ driverEmailById[u.id] = u.email; });
+      var assetsById = {};
+      (assetsRes.data || []).forEach(function(a){ assetsById[a.id] = a; });
+      var jobNameById = {};
+      jobs.forEach(function(j){ jobNameById[j.id] = (j.meta && j.meta.project) || j.name || "Untitled job"; });
+      var openCheckouts = (checkoutsRes.data || []).filter(function(c){ return !c.returned_at; });
       renderJdDeliveries(deliveriesRes && deliveriesRes.data || [], driverEmailById);
-      renderJobsDashboard(jobsRes.data || [], rowsByJob, openReqByJob);
+      renderJdAssetsDeployed(openCheckouts, assetsById, jobNameById);
+      renderJobsDashboard(jobs, rowsByJob, openReqByJob);
     }).catch(function(e){
       jdMsg("Couldn't load: " + (e && e.message ? e.message : e), "bad");
       list.textContent = "";
@@ -7017,6 +7156,29 @@
       '</div>';
   }
 
+  // 3rd dashboard section: assets currently checked out against any
+  // delivery, cross-referenced with the job they're out with, so staff can
+  // see what's deployed without opening Assets separately.
+  function renderJdAssetsDeployed(openCheckouts, assetsById, jobNameById){
+    var box = cloudEl("jdAssetsDeployed");
+    if (!box) return;
+    if (!openCheckouts.length){ box.innerHTML = ""; return; }
+    box.innerHTML = '<h3 class="jd-deliveries-title">Deployed assets</h3>' +
+      '<div class="jd-deliveries-list">' +
+      openCheckouts.map(function(c){
+        var asset = assetsById[c.asset_id] || {};
+        var assetLabel = asset.label || "Untitled asset";
+        var jobName = c.job_id ? (jobNameById[c.job_id] || "Unknown job") : "Unknown job";
+        var since = formatWhen(c.checked_out_at).replace(/^Updated\s+/, "");
+        return '<div class="jd-delivery-row">' +
+          '<span class="jd-delivery-job">' + escHtml(assetLabel) + '</span>' +
+          '<span class="jd-delivery-driver">' + escHtml(jobName) + '</span>' +
+          '<span class="jd-delivery-when">out since ' + escHtml(since) + '</span>' +
+        '</div>';
+      }).join("") +
+      '</div>';
+  }
+
   function renderJobsDashboard(jobs, rowsByJob, openReqByJob){
     var list = cloudEl("jdList");
     if (!jobs.length){ list.innerHTML = ""; jdMsg("No active jobs yet."); return; }
@@ -7024,6 +7186,7 @@
     var cards = jobs.map(function(j){
       var stats = jdStatusCounts(rowsByJob[j.id] || []);
       stats.openRequests = openReqByJob[j.id] || 0;
+      stats.pct = stats.total ? Math.round(stats.shipped / stats.total * 100) : 0;
       return {job: j, stats: stats};
     });
     // most remaining-to-ship first, so whatever job needs the most
@@ -7040,12 +7203,18 @@
         '<div class="jd-card-head"><span class="jd-job">' + escHtml(jobName) + (jobNum ? ' — ' + escHtml(jobNum) : '') + '</span>' +
           '<button type="button" class="jd-open-btn" data-jd-open="' + j.id + '">Open</button></div>' +
         (address ? '<div class="jd-address">' + escHtml(address) + '</div>' : '') +
-        '<div class="jd-stats">' +
-          '<span class="jd-stat">Total <b>' + s.total + '</b></span>' +
-          '<span class="jd-stat">Received <b>' + s.received + '</b></span>' +
-          '<span class="jd-stat">Shipped <b>' + s.shipped + '</b></span>' +
-          '<span class="jd-stat">Remaining <b>' + s.remaining + '</b></span>' +
-          '<span class="jd-stat jd-open-requests">Open requests <b>' + s.openRequests + '</b></span>' +
+        '<div class="jd-overall">' +
+          '<div class="jd-pct-wrap"><div class="jd-pct mono">' + s.pct + '%</div><div class="jd-pct-label">shipped</div></div>' +
+          '<div class="jd-bar-wrap">' +
+            '<div class="jd-track"><div class="jd-fill" style="width:' + s.pct + '%"></div></div>' +
+            '<div class="jd-counts">' +
+              '<span><b>' + s.total + '</b> total</span>' +
+              '<span><b>' + s.received + '</b> received</span>' +
+              '<span><b>' + s.shipped + '</b> shipped</span>' +
+              '<span><b>' + s.remaining + '</b> remaining</span>' +
+              '<span class="jd-open-requests"><b>' + s.openRequests + '</b> open requests</span>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
       '</div>';
     }).join("");
@@ -7212,8 +7381,11 @@
       // formatWhen() is shared with the Jobs list and always prefixes
       // "Updated " (right there, that's correct) - strip it back off here,
       // since "out since Updated Oct 3..." reads wrong for a checkout time.
-      var outWhen = formatWhen(checkout.checked_out_at).replace(/^Updated\s+/, "");
-      var outLine = out ? '<div class="asset-sub asset-assigned">Assigned to <b>' + escHtml(jobName) + '</b> · out since ' + escHtml(outWhen) + '</div>' : "";
+      // Only computed when actually checked out - checkout is undefined for
+      // an available asset, and formatWhen(undefined) throws.
+      var outLine = out
+        ? '<div class="asset-sub asset-assigned">Assigned to <b>' + escHtml(jobName) + '</b> · out since ' + escHtml(formatWhen(checkout.checked_out_at).replace(/^Updated\s+/, "")) + '</div>'
+        : "";
       return '<div class="asset-row" data-asset-id="' + a.id + '">' +
         pickCheckbox +
         '<div class="asset-info">' +
@@ -7227,19 +7399,20 @@
       '</div>';
     }).join("");
   }
-  function openAssetsModal(picker){
-    assetPickerMode = !!picker;
-    cloudEl("assetsPickerActions").hidden = !assetPickerMode;
-    cloudEl("assetsSub").textContent = assetPickerMode
-      ? "Check the assets going out with this delivery, then Use selected."
-      : "Full-access staff only (view-only for Tech - all jobs). Shared pool, reused across every job.";
+  // Picker-only now - the top bar's "Assets" button opens the fuller Asset
+  // Audit page instead (see "asset audit" section below); this modal is
+  // reached only from Create Delivery Slip's "Assign to a driver" -> Assets,
+  // to pick which assets ride along on that delivery.
+  function openAssetsModal(){
+    assetPickerMode = true;
+    cloudEl("assetsPickerActions").hidden = false;
     cloudEl("assetsBackdrop").hidden = false;
     loadAssets();
   }
   function closeAssetsModal(){ cloudEl("assetsBackdrop").hidden = true; }
 
   var assetsBtnEl = cloudEl("assetsBtn");
-  if (assetsBtnEl) assetsBtnEl.addEventListener("click", function(){ openAssetsModal(false); });
+  if (assetsBtnEl) assetsBtnEl.addEventListener("click", openAssetAuditModal);
   var assetsCloseBtnEl = cloudEl("assetsCloseBtn");
   if (assetsCloseBtnEl) assetsCloseBtnEl.addEventListener("click", closeAssetsModal);
   var assetsBackdropEl = cloudEl("assetsBackdrop");
@@ -7305,6 +7478,361 @@
     closeAssetsModal();
   });
 
+  // ---------- asset audit (full review/audit page - staff; view-only for
+  // an unlocked "Tech - all jobs" account, same restriction the old
+  // standalone Assets screen had) ----------
+  var auditAssetsCache = []; // all non-deleted assets
+  var auditCheckoutsCache = []; // EVERY checkout, open and returned - history needs the closed ones too
+  var auditJobNameById = {}; // job_id -> name, for every job ANY checkout here references
+  var auditEditingId = null; // asset id being edited in the Add/Edit modal, or null when adding
+  var auditSearchTerm = "";
+  var auditStatusFilter = "all"; // all | available | out
+  var auditCategoryFilter = ""; // "" = all categories
+
+  function assetAuditMsg(text, kind){
+    var m = cloudEl("assetAuditMsg");
+    if (!m) return;
+    m.textContent = text || "";
+    m.className = "assets-msg" + (kind ? " " + kind : "");
+  }
+  function auditOpenCheckoutFor(assetId){
+    return auditCheckoutsCache.filter(function(c){ return c.asset_id === assetId && !c.returned_at; })[0];
+  }
+  function auditAllCheckoutsFor(assetId){
+    return auditCheckoutsCache
+      .filter(function(c){ return c.asset_id === assetId; })
+      .sort(function(a, b){ return new Date(b.checked_out_at) - new Date(a.checked_out_at); });
+  }
+  function loadAssetAudit(){
+    var body = cloudEl("assetAuditBody");
+    body.innerHTML = '<tr><td colspan="9">Loading...</td></tr>';
+    assetAuditMsg("");
+    return Promise.all([
+      cloud.sb.from("eq_assets").select("*").eq("deleted", false).order("label"),
+      cloud.sb.from("eq_asset_checkouts").select("*")
+    ]).then(function(results){
+      var assetsRes = results[0], checkoutsRes = results[1];
+      if (assetsRes.error){ assetAuditMsg("Couldn't load: " + assetsRes.error.message, "bad"); body.innerHTML = ""; return; }
+      auditAssetsCache = assetsRes.data || [];
+      auditCheckoutsCache = checkoutsRes.data || [];
+      var jobIds = Array.from(new Set(auditCheckoutsCache.map(function(c){ return c.job_id; }).filter(Boolean)));
+      if (!jobIds.length){ auditJobNameById = {}; renderAssetAuditCategoryOptions(); renderAssetAuditTable(); return; }
+      return cloud.sb.from("eq_jobs").select("id,name,meta").in("id", jobIds).then(function(jr){
+        auditJobNameById = {};
+        (jr.data || []).forEach(function(j){ auditJobNameById[j.id] = (j.meta && j.meta.project) || j.name || "Untitled job"; });
+        renderAssetAuditCategoryOptions();
+        renderAssetAuditTable();
+      });
+    }).catch(function(e){
+      assetAuditMsg(isNetworkProblem(e) ? "You're offline — this needs an internet connection." : "Couldn't load: " + (e && e.message ? e.message : e), "bad");
+      body.innerHTML = "";
+    });
+  }
+  function renderAssetAuditCategoryOptions(){
+    var sel = cloudEl("assetAuditCategoryFilter");
+    var current = sel.value;
+    var categories = Array.from(new Set(auditAssetsCache.map(function(a){ return (a.category || "").trim(); }).filter(Boolean))).sort();
+    sel.innerHTML = '<option value="">All categories</option>' +
+      categories.map(function(c){ return '<option value="' + escHtml(c) + '">' + escHtml(c) + '</option>'; }).join("");
+    if (categories.indexOf(current) !== -1) sel.value = current;
+  }
+  function assetAuditMatchesFilters(a){
+    var checkout = auditOpenCheckoutFor(a.id);
+    var out = !!checkout;
+    if (auditStatusFilter === "available" && out) return false;
+    if (auditStatusFilter === "out" && !out) return false;
+    if (auditCategoryFilter && (a.category || "") !== auditCategoryFilter) return false;
+    if (auditSearchTerm){
+      var hay = [a.label, a.barcode, a.manufacturer, a.model, a.category, a.description].join(" ").toLowerCase();
+      if (hay.indexOf(auditSearchTerm) === -1) return false;
+    }
+    return true;
+  }
+  function renderAssetAuditTable(){
+    var body = cloudEl("assetAuditBody");
+    if (!auditAssetsCache.length){ body.innerHTML = ""; assetAuditMsg("No assets yet."); return; }
+    var visible = auditAssetsCache.filter(assetAuditMatchesFilters);
+    if (!visible.length){ body.innerHTML = ""; assetAuditMsg("No assets match your search/filters."); return; }
+    assetAuditMsg("");
+    body.innerHTML = visible.map(function(a){
+      var checkout = auditOpenCheckoutFor(a.id);
+      var out = !!checkout;
+      var jobName = out ? (checkout.job_id ? (auditJobNameById[checkout.job_id] || "Unknown job") : "Unknown job") : "";
+      return '<tr data-asset-id="' + a.id + '">' +
+        '<td>' + escHtml(a.label || "Untitled asset") + '</td>' +
+        '<td>' + escHtml(a.category || "") + '</td>' +
+        '<td>' + escHtml(a.barcode || "") + '</td>' +
+        '<td>' + escHtml(a.manufacturer || "") + '</td>' +
+        '<td>' + escHtml(a.model || "") + '</td>' +
+        '<td class="asset-audit-desc">' + escHtml(a.description || "") + '</td>' +
+        '<td><span class="asset-status-badge ' + (out ? "out" : "available") + '">' + (out ? "Checked out" : "Available") + '</span></td>' +
+        '<td>' + (out ? escHtml(jobName) : "") + '</td>' +
+        '<td class="asset-audit-actions">' +
+          '<button type="button" class="asset-audit-edit" data-audit-edit="' + a.id + '">Edit</button>' +
+          '<button type="button" class="asset-audit-delete" data-audit-delete="' + a.id + '">Delete</button>' +
+          '<button type="button" data-audit-history="' + a.id + '">History</button>' +
+        '</td>' +
+      '</tr>';
+    }).join("");
+  }
+  function openAssetAuditModal(){
+    cloudEl("assetAuditBackdrop").hidden = false;
+    cloudEl("assetAuditSearch").value = "";
+    cloudEl("assetAuditStatusFilter").value = "all";
+    auditSearchTerm = "";
+    auditStatusFilter = "all";
+    auditCategoryFilter = "";
+    loadAssetAudit();
+  }
+  function closeAssetAuditModal(){ cloudEl("assetAuditBackdrop").hidden = true; }
+
+  var assetAuditCloseBtnEl = cloudEl("assetAuditCloseBtn");
+  if (assetAuditCloseBtnEl) assetAuditCloseBtnEl.addEventListener("click", closeAssetAuditModal);
+  var assetAuditBackdropEl = cloudEl("assetAuditBackdrop");
+  if (assetAuditBackdropEl) assetAuditBackdropEl.addEventListener("click", function(ev){ if (ev.target === assetAuditBackdropEl) closeAssetAuditModal(); });
+
+  var assetAuditSearchEl = cloudEl("assetAuditSearch");
+  if (assetAuditSearchEl) assetAuditSearchEl.addEventListener("input", function(){
+    auditSearchTerm = assetAuditSearchEl.value.trim().toLowerCase();
+    renderAssetAuditTable();
+  });
+  var assetAuditStatusFilterEl = cloudEl("assetAuditStatusFilter");
+  if (assetAuditStatusFilterEl) assetAuditStatusFilterEl.addEventListener("change", function(){
+    auditStatusFilter = assetAuditStatusFilterEl.value;
+    renderAssetAuditTable();
+  });
+  var assetAuditCategoryFilterEl = cloudEl("assetAuditCategoryFilter");
+  if (assetAuditCategoryFilterEl) assetAuditCategoryFilterEl.addEventListener("change", function(){
+    auditCategoryFilter = assetAuditCategoryFilterEl.value;
+    renderAssetAuditTable();
+  });
+
+  // ---------- add/edit asset modal (shared by both) ----------
+  function openAssetEditModal(asset){
+    auditEditingId = asset ? asset.id : null;
+    cloudEl("assetEditTitle").textContent = asset ? "Edit asset" : "Add asset";
+    cloudEl("assetEditSaveBtn").textContent = asset ? "Save changes" : "Add asset";
+    cloudEl("assetEditLabel").value = asset ? (asset.label || "") : "";
+    cloudEl("assetEditCategory").value = asset ? (asset.category || "") : "";
+    cloudEl("assetEditBarcode").value = asset ? (asset.barcode || "") : "";
+    cloudEl("assetEditManufacturer").value = asset ? (asset.manufacturer || "") : "";
+    cloudEl("assetEditModel").value = asset ? (asset.model || "") : "";
+    cloudEl("assetEditDescription").value = asset ? (asset.description || "") : "";
+    cloudEl("assetEditNotes").value = asset ? (asset.notes || "") : "";
+    assetEditMsg("");
+    cloudEl("assetEditBackdrop").hidden = false;
+  }
+  function closeAssetEditModal(){ cloudEl("assetEditBackdrop").hidden = true; }
+  function assetEditMsg(text, kind){
+    var m = cloudEl("assetEditMsg");
+    m.textContent = text || "";
+    m.className = "assets-msg" + (kind ? " " + kind : "");
+  }
+
+  var assetAuditAddBtnEl = cloudEl("assetAuditAddBtn");
+  if (assetAuditAddBtnEl) assetAuditAddBtnEl.addEventListener("click", function(){ openAssetEditModal(null); });
+  var assetEditCloseBtnEl = cloudEl("assetEditCloseBtn");
+  if (assetEditCloseBtnEl) assetEditCloseBtnEl.addEventListener("click", closeAssetEditModal);
+  var assetEditBackdropEl = cloudEl("assetEditBackdrop");
+  if (assetEditBackdropEl) assetEditBackdropEl.addEventListener("click", function(ev){ if (ev.target === assetEditBackdropEl) closeAssetEditModal(); });
+
+  var assetEditSaveBtnEl = cloudEl("assetEditSaveBtn");
+  if (assetEditSaveBtnEl) assetEditSaveBtnEl.addEventListener("click", function(){
+    var label = cloudEl("assetEditLabel").value.trim();
+    if (!label){ assetEditMsg("Type a label first.", "bad"); return; }
+    var fields = {
+      label: label,
+      category: cloudEl("assetEditCategory").value.trim(),
+      barcode: cloudEl("assetEditBarcode").value.trim(),
+      manufacturer: cloudEl("assetEditManufacturer").value.trim(),
+      model: cloudEl("assetEditModel").value.trim(),
+      description: cloudEl("assetEditDescription").value.trim(),
+      notes: cloudEl("assetEditNotes").value.trim(),
+      updated_by: cloud.clientId
+    };
+    assetEditSaveBtnEl.disabled = true;
+    var req = auditEditingId
+      ? cloud.sb.from("eq_assets").update(fields).eq("id", auditEditingId)
+      : cloud.sb.from("eq_assets").insert(Object.assign({id: cloudUuid()}, fields));
+    req.then(function(r){
+      assetEditSaveBtnEl.disabled = false;
+      if (r.error){ assetEditMsg("Couldn't save: " + r.error.message, "bad"); return; }
+      closeAssetEditModal();
+      loadAssetAudit();
+    }).catch(function(e){
+      assetEditSaveBtnEl.disabled = false;
+      assetEditMsg(isNetworkProblem(e) ? "You're offline — this needs an internet connection." : "Couldn't save: " + (e && e.message ? e.message : e), "bad");
+    });
+  });
+
+  // ---------- edit / delete / history actions in the audit table ----------
+  document.addEventListener("click", function(ev){
+    var editBtn = ev.target.closest && ev.target.closest("[data-audit-edit]");
+    if (editBtn){
+      var asset = auditAssetsCache.filter(function(a){ return a.id === editBtn.dataset.auditEdit; })[0];
+      if (asset) openAssetEditModal(asset);
+      return;
+    }
+    var deleteBtn = ev.target.closest && ev.target.closest("[data-audit-delete]");
+    if (deleteBtn){
+      var id = deleteBtn.dataset.auditDelete;
+      if (auditOpenCheckoutFor(id)){ assetAuditMsg("This asset is checked out - mark it returned before deleting it.", "bad"); return; }
+      var toDelete = auditAssetsCache.filter(function(a){ return a.id === id; })[0];
+      if (!window.confirm('Delete "' + ((toDelete && toDelete.label) || "this asset") + '"? This can\'t be undone.')) return;
+      deleteBtn.disabled = true;
+      cloud.sb.from("eq_assets").update({deleted: true, updated_by: cloud.clientId}).eq("id", id).then(function(r){
+        if (r.error){ assetAuditMsg("Couldn't delete: " + r.error.message, "bad"); deleteBtn.disabled = false; return; }
+        loadAssetAudit();
+      }).catch(function(e){
+        deleteBtn.disabled = false;
+        assetAuditMsg(isNetworkProblem(e) ? "You're offline — this needs an internet connection." : "Couldn't delete: " + (e && e.message ? e.message : e), "bad");
+      });
+      return;
+    }
+    var historyBtn = ev.target.closest && ev.target.closest("[data-audit-history]");
+    if (historyBtn){ openAssetHistoryModal(historyBtn.dataset.auditHistory); return; }
+  });
+
+  // ---------- checkout history ----------
+  function openAssetHistoryModal(assetId){
+    var asset = auditAssetsCache.filter(function(a){ return a.id === assetId; })[0];
+    cloudEl("assetHistoryTitle").textContent = "Checkout history" + (asset ? " - " + asset.label : "");
+    var records = auditAllCheckoutsFor(assetId);
+    var list = cloudEl("assetHistoryList");
+    if (!records.length){
+      list.innerHTML = '<div class="asset-history-empty">This asset has never been checked out.</div>';
+    } else {
+      list.innerHTML = records.map(function(c){
+        var jobName = c.job_id ? (auditJobNameById[c.job_id] || "Unknown job") : "Unknown job";
+        var outWhen = formatWhen(c.checked_out_at).replace(/^Updated\s+/, "");
+        var statusLine = c.returned_at
+          ? "Returned " + formatWhen(c.returned_at).replace(/^Updated\s+/, "") + (c.returned_by ? " by " + escHtml(c.returned_by) : "")
+          : "Still out";
+        return '<div class="asset-history-row">' +
+          '<div class="ahr-job">' + escHtml(jobName) + '</div>' +
+          '<div class="ahr-line">Out ' + escHtml(outWhen) + (c.checked_out_by ? " by " + escHtml(c.checked_out_by) : "") + '</div>' +
+          '<div class="ahr-line">' + statusLine + '</div>' +
+        '</div>';
+      }).join("");
+    }
+    cloudEl("assetHistoryBackdrop").hidden = false;
+  }
+  function closeAssetHistoryModal(){ cloudEl("assetHistoryBackdrop").hidden = true; }
+  var assetHistoryCloseBtnEl = cloudEl("assetHistoryCloseBtn");
+  if (assetHistoryCloseBtnEl) assetHistoryCloseBtnEl.addEventListener("click", closeAssetHistoryModal);
+  var assetHistoryBackdropEl = cloudEl("assetHistoryBackdrop");
+  if (assetHistoryBackdropEl) assetHistoryBackdropEl.addEventListener("click", function(ev){ if (ev.target === assetHistoryBackdropEl) closeAssetHistoryModal(); });
+
+  // ---------- download/upload spreadsheet ----------
+  var ASSET_COL_LABEL_TO_KEY = {
+    "label": "label", "asset": "label", "name": "label", "asset label": "label",
+    "category": "category",
+    "barcode": "barcode", "bar code": "barcode",
+    "make": "manufacturer", "manufacturer": "manufacturer",
+    "model": "model",
+    "description": "description",
+    "notes": "notes"
+  };
+
+  var assetAuditExportBtnEl = cloudEl("assetAuditExportBtn");
+  if (assetAuditExportBtnEl) assetAuditExportBtnEl.addEventListener("click", function(){
+    if (typeof XLSX === "undefined"){ assetAuditMsg("Excel export library failed to load — check your connection.", "bad"); return; }
+    var visible = auditAssetsCache.filter(assetAuditMatchesFilters);
+    var header = ["Label", "Category", "BarCode", "Make", "Model", "Description", "Notes", "Status", "Assigned Job"];
+    var aoa = [header];
+    visible.forEach(function(a){
+      var checkout = auditOpenCheckoutFor(a.id);
+      var isOut = !!checkout;
+      var jobName = isOut && checkout.job_id ? (auditJobNameById[checkout.job_id] || "Unknown job") : "";
+      aoa.push([a.label || "", a.category || "", a.barcode || "", a.manufacturer || "", a.model || "", a.description || "", a.notes || "", isOut ? "Checked out" : "Available", jobName]);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = header.map(function(h, i){
+      var maxLen = h.length;
+      aoa.slice(1).forEach(function(row){ var len = String(row[i] || "").length; if (len > maxLen) maxLen = len; });
+      return {wch: Math.max(9, maxLen + 2)};
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Assets");
+    var wbOut = XLSX.write(wb, {bookType: "xlsx", type: "array"});
+    var blob = new Blob([wbOut], {type: "application/octet-stream"});
+    var now = new Date();
+    var pad2 = function(n){ return String(n).padStart(2, "0"); };
+    var stamp = pad2(now.getHours()) + pad2(now.getMinutes()) + "-" + pad2(now.getMonth() + 1) + pad2(now.getDate()) + String(now.getFullYear()).slice(2);
+    downloadBlob(blob, "Assets - " + stamp + ".xlsx");
+    assetAuditMsg("Downloaded " + visible.length + " asset" + (visible.length === 1 ? "" : "s") + ".", "good");
+  });
+
+  var assetAuditImportBtnEl = cloudEl("assetAuditImportBtn");
+  var assetAuditImportFileEl = cloudEl("assetAuditImportFile");
+  if (assetAuditImportBtnEl && assetAuditImportFileEl) assetAuditImportBtnEl.addEventListener("click", function(){ assetAuditImportFileEl.click(); });
+  if (assetAuditImportFileEl) assetAuditImportFileEl.addEventListener("change", function(){
+    var file = assetAuditImportFileEl.files[0];
+    assetAuditImportFileEl.value = "";
+    if (!file) return;
+    if (typeof XLSX === "undefined"){ assetAuditMsg("Excel import library failed to load — check your connection.", "bad"); return; }
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var wb;
+      try { wb = XLSX.read(e.target.result, {type: "array"}); }
+      catch (err){ assetAuditMsg("Couldn't read that file - is it a valid .xlsx?", "bad"); return; }
+      var sheetName = wb.SheetNames[0];
+      var aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header: 1, defval: "", raw: true});
+      var headerRowIdx = -1, colMap = {};
+      for (var i = 0; i < aoa.length; i++){
+        var row = aoa[i], hits = 0, map = {};
+        for (var j = 0; j < row.length; j++){
+          var label = String(row[j] || "").trim().toLowerCase();
+          if (ASSET_COL_LABEL_TO_KEY[label]){ map[j] = ASSET_COL_LABEL_TO_KEY[label]; hits++; }
+        }
+        if (hits >= 2){ headerRowIdx = i; colMap = map; break; }
+      }
+      if (headerRowIdx === -1){ assetAuditMsg("Couldn't find a header row - make sure it has Label/Category/BarCode/Make/Model columns.", "bad"); return; }
+      var byBarcode = {};
+      auditAssetsCache.forEach(function(a){
+        var bc = (a.barcode || "").trim().toLowerCase();
+        if (bc && !byBarcode[bc]) byBarcode[bc] = a;
+      });
+      var inserts = [], updates = [];
+      for (var rr = headerRowIdx + 1; rr < aoa.length; rr++){
+        var cells = aoa[rr] || [];
+        if (!cells.some(function(v){ return String(v || "").trim() !== ""; })) continue;
+        var fields = {};
+        Object.keys(colMap).forEach(function(idx){
+          fields[colMap[idx]] = String(cells[idx] === undefined || cells[idx] === null ? "" : cells[idx]).trim();
+        });
+        if (!fields.label) continue;
+        var bc = (fields.barcode || "").trim().toLowerCase();
+        var existing = bc ? byBarcode[bc] : null;
+        if (existing){ updates.push(Object.assign({id: existing.id}, fields)); }
+        else { inserts.push(Object.assign({id: cloudUuid()}, fields)); }
+      }
+      if (!inserts.length && !updates.length){ assetAuditMsg("No usable rows found in that file.", "bad"); return; }
+      assetAuditMsg("Importing...");
+      Promise.all(
+        (inserts.length ? [cloud.sb.from("eq_assets").insert(inserts.map(function(f){ return Object.assign({}, f, {updated_by: cloud.clientId}); }))] : [])
+        .concat(updates.map(function(f){
+          var id = f.id;
+          var fieldsOnly = Object.assign({}, f);
+          delete fieldsOnly.id;
+          fieldsOnly.updated_by = cloud.clientId;
+          return cloud.sb.from("eq_assets").update(fieldsOnly).eq("id", id);
+        }))
+      ).then(function(results){
+        var errored = results.filter(function(r){ return r && r.error; });
+        // loadAssetAudit() clears the message when it (re)loads, so the
+        // summary has to be shown AFTER that reload finishes, not before.
+        return loadAssetAudit().then(function(){
+          if (errored.length){ assetAuditMsg("Imported with errors: " + errored[0].error.message, "bad"); }
+          else { assetAuditMsg("Imported " + inserts.length + " new, updated " + updates.length + ".", "good"); }
+        });
+      }).catch(function(e){
+        assetAuditMsg(isNetworkProblem(e) ? "You're offline — this needs an internet connection." : "Couldn't import: " + (e && e.message ? e.message : e), "bad");
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
   // ---------- assign to a driver (inside Create Delivery Slip) ----------
   var driversCache = []; // [{id,email}] - admin-users accounts with role=driver
 
@@ -7342,7 +7870,7 @@
   });
 
   var assignAssetsBtnEl = cloudEl("assignAssetsBtn");
-  if (assignAssetsBtnEl) assignAssetsBtnEl.addEventListener("click", function(){ openAssetsModal(true); });
+  if (assignAssetsBtnEl) assignAssetsBtnEl.addEventListener("click", openAssetsModal);
 
   var assignDriverBtnEl = cloudEl("assignDriverBtn");
   if (assignDriverBtnEl) assignDriverBtnEl.addEventListener("click", function(){
