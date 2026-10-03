@@ -121,7 +121,7 @@
   a{ color:inherit; }
   button{ font-family:inherit; }
 
-  .wrap{ max-width:1040px; margin:0 auto; }
+  .wrap{ max-width:none; width:100%; margin:0 auto; }
 
   /* ---- Top bar ---- */
   .topbar{
@@ -536,12 +536,23 @@
   .it-cl-card .it-cl-foot{margin-top:12px;font-size:12px;color:var(--text-faint);text-align:center;line-height:1.5;}
 
   .it-cloud-bar{display:none;align-items:center;gap:8px;font-size:12.5px;color:var(--text-muted);flex-wrap:wrap;}
-  .it-cloud-bar .it-cloud-user{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .it-cloud-bar button.tool-btn{padding:5px 11px;font-size:12.5px;}
   #itSyncDot{width:7px;height:7px;border-radius:50%;background:var(--good);flex:none;display:inline-block;}
   #itSyncDot.busy{background:var(--gold);animation:it-pulse 1s ease-in-out infinite;}
   #itSyncDot.bad{background:var(--danger);}
   @keyframes it-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+  /* These all show text that changes a lot while you work ("Live — synced"
+     vs "Syncing..." vs "Sync problem: ...", "Submit" vs "Submit (3)" vs
+     "Sending...", the job-info/backup-folder notes, your own email) - a
+     plain inline span/button just resizes to fit whatever's in it right
+     now, which shoves every button after it sideways each time the text
+     changes. Fixed widths (not just max-width, and flex-shrink:0 so the
+     row can't squeeze them either) keep every button's position constant
+     regardless of what these actually say at any given moment. */
+  #itSyncLabel{display:inline-block;width:118px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .it-cloud-bar .it-cloud-user{width:150px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #itSubmitReportBtn{width:88px;flex:none;}
+  #itJobInfoNote.it-backup-note, #itBackupFolderNote.it-backup-note{width:130px;flex:none;}
   /* once cloud mode is confirmed on, the local-file banner is replaced by the sync bar above */
   body.it-cloud .it-cloud-bar{display:flex;}
   body.it-cloud #syncBanner{display:none;}
