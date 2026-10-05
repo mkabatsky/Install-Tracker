@@ -363,6 +363,17 @@
     box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
   }
   #bomDialog::backdrop{ background:rgba(12,24,48,.45); }
+  #addItemDialog{
+    width:min(560px, calc(100vw - 24px)); max-height:calc(100vh - 32px); padding:0;
+    border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text);
+    box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
+  }
+  #addItemDialog::backdrop{ background:rgba(12,24,48,.45); }
+  .add-body{ display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; align-content:start; }
+  .add-body .add-wide{ grid-column:1 / -1; }
+  .add-field{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-muted); }
+  .add-field select{ font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); }
+  .add-err{ grid-column:1 / -1; color:var(--danger); font-weight:600; min-height:18px; margin:0; }
   .bom-shell{ display:flex; flex-direction:column; max-height:calc(100vh - 34px); }
   .bom-head{ display:flex; align-items:center; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border-soft); flex-wrap:wrap; }
   .bom-head h2{ font-size:20px; }
@@ -746,6 +757,7 @@
   .it-dash-card .overall-bar{width:100%;}
   .it-dash-sort{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;color:var(--text-muted);}
   .it-dash-sort select{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
+  .it-dash-sort input[type="search"]{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);margin-left:auto;width:220px;max-width:100%;}
   .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
   .it-dash-msg.bad{color:var(--danger);font-weight:600;}
 </style>
@@ -817,6 +829,7 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
         Load BOM
       </button>
+      <button class="tool-btn" id="addItemBtn" type="button">+ Add room / item</button>
       <input type="file" id="bomFileInput" accept=".xlsx,.xlsm,.csv,.tsv,.txt" multiple hidden>
       <button class="tool-btn" id="loadBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V9"/><path d="M7 14l5-5 5 5"/><path d="M5 21h14"/></svg>
@@ -974,6 +987,7 @@
         <option value="name_asc">Name (A–Z)</option>
         <option value="name_desc">Name (Z–A)</option>
       </select>
+      <input type="search" id="itDashSearch" placeholder="Search projects" autocomplete="off" aria-label="Search projects">
     </div>
     <div class="it-dash-list" id="itDashList"></div>
     <div class="it-dash-msg" id="itDashMsg" aria-live="polite"></div>
@@ -993,6 +1007,35 @@
       <span id="bomStatus" class="mono"></span>
       <button type="button" class="tool-btn" id="bomBack">Back</button>
       <button type="button" class="tool-btn tool-btn-primary" id="bomNext">Next</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="addItemDialog" aria-labelledby="addItemTitle">
+  <div class="bom-shell">
+    <div class="bom-head">
+      <h2 id="addItemTitle">Add room / item</h2>
+      <button type="button" class="bom-x" id="addItemClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="bom-body add-body">
+      <label class="add-field add-wide">Room
+        <select id="addRoomSel"></select>
+      </label>
+      <div class="add-wide add-body" id="addNewRoom" style="padding:0">
+        <label class="add-field">Floor<input class="bom-in" id="addFloor" value="1"></label>
+        <label class="add-field">Room #<input class="bom-in" id="addRoomNo" placeholder="e.g. 101 or Main"></label>
+        <label class="add-field add-wide">Room type<input class="bom-in" id="addRoomType" placeholder="e.g. Conference Room"></label>
+      </div>
+      <label class="add-field">Mfr<input class="bom-in" id="addMfr"></label>
+      <label class="add-field">Model<input class="bom-in" id="addModel"></label>
+      <label class="add-field add-wide">Description<input class="bom-in" id="addDesc"></label>
+      <label class="add-field">Qty<input class="bom-in" id="addQty" type="number" min="1" value="1"></label>
+      <p class="add-err" id="addErr" role="alert"></p>
+    </div>
+    <div class="bom-foot">
+      <span class="mono" id="addHint"></span>
+      <button type="button" class="tool-btn" id="addItemCancel">Cancel</button>
+      <button type="button" class="tool-btn tool-btn-primary" id="addItemSave">Add</button>
     </div>
   </div>
 </dialog>
@@ -1017,6 +1060,7 @@
   var cloudCreateProjectFromBom = function(){ return false; };
   var cloudNotifyStatusChanged = function(){};
   var cloudNotifyCableStatusChanged = function(){};
+  var cloudEditAllowed = function(){ return true; };
 
   var ITEMS = []; // starts blank — build a schedule with Load BOM, or open a saved tracker .html
 
@@ -3688,11 +3732,101 @@
     imp = null;
   }
 
+  // ---- Add a room (with its first line item) or a line item to an existing room, by hand ----
+  function addRoomsOnHand(){
+    var out = [], seen = {};
+    state.order.forEach(function(id){
+      var it = state.items[id];
+      if(!it || seen[it.roomKey]) return;
+      seen[it.roomKey] = true;
+      out.push({ key: it.roomKey, floor: it.floor, roomNumber: it.roomNumber, roomType: it.roomType, roomIndexOnFloor: it.roomIndexOnFloor });
+    });
+    return out;
+  }
+  function addItemSetError(msg){ document.getElementById("addErr").textContent = msg || ""; }
+  function addItemSyncRoomFields(){
+    var isNew = document.getElementById("addRoomSel").value === "__new";
+    document.getElementById("addNewRoom").style.display = isNew ? "" : "none";
+    document.getElementById("addHint").textContent = isNew ? "New room + first line item" : "New line item in this room";
+  }
+  function openAddItem(){
+    if(!cloudEditAllowed()){
+      alert("Open a project first. Viewers can't add rooms or items.");
+      return;
+    }
+    var sel = document.getElementById("addRoomSel");
+    var rooms = addRoomsOnHand();
+    sel.innerHTML = '<option value="__new">+ New room</option>' + rooms.map(function(r){
+      return '<option value="' + escapeHtml(r.key) + '">Floor ' + escapeHtml(String(r.floor)) + " · Room " + escapeHtml(String(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
+    }).join("");
+    sel.value = "__new";
+    ["addRoomNo", "addRoomType", "addMfr", "addModel", "addDesc"].forEach(function(id){ document.getElementById(id).value = ""; });
+    document.getElementById("addFloor").value = "1";
+    document.getElementById("addQty").value = "1";
+    addItemSetError("");
+    addItemSyncRoomFields();
+    document.getElementById("addItemDialog").showModal();
+  }
+  function addItemClose(){ document.getElementById("addItemDialog").close(); }
+  function saveAddItem(){
+    var val = function(id){ return document.getElementById(id).value.trim(); };
+    var sel = document.getElementById("addRoomSel").value;
+    var mfr = val("addMfr"), model = val("addModel"), desc = val("addDesc");
+    var qty = parseInt(val("addQty"), 10);
+    if(!(qty >= 1)){ addItemSetError("Qty must be 1 or more."); return; }
+    if(!model && !desc){ addItemSetError("Enter a model or a description."); return; }
+
+    var floor, roomNumber, roomType, roomKey, roomIndexOnFloor;
+    if(sel === "__new"){
+      var floorRaw = val("addFloor");
+      if(!floorRaw){ addItemSetError("Enter a floor."); return; }
+      floor = toFloorValue(floorRaw);
+      if(floor == null) floor = floorRaw;
+      roomNumber = val("addRoomNo");
+      if(!roomNumber){ addItemSetError("Enter a room #."); return; }
+      roomKey = String(floor) + "-" + roomNumber;
+      var existing = addRoomsOnHand();
+      if(existing.some(function(r){ return r.key === roomKey; })){
+        addItemSetError("Room " + roomNumber + " already exists on floor " + floor + ". Pick it from the Room list.");
+        return;
+      }
+      roomType = val("addRoomType");
+      roomIndexOnFloor = existing.filter(function(r){ return String(r.floor) === String(floor); }).length + 1;
+    } else {
+      var src = addRoomsOnHand().filter(function(r){ return r.key === sel; })[0];
+      if(!src){ addItemSetError("That room is no longer in the schedule. Pick another."); return; }
+      floor = src.floor; roomNumber = src.roomNumber; roomType = src.roomType; roomKey = src.key; roomIndexOnFloor = src.roomIndexOnFloor;
+    }
+
+    var itemIndexInRoom = state.order.filter(function(id){ return state.items[id] && state.items[id].roomKey === roomKey; }).length + 1;
+    var id = "man-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    state.items[id] = withDefaults({
+      id: id, floor: floor, roomNumber: String(roomNumber), roomType: roomType || "", roomKey: roomKey,
+      roomIndexOnFloor: roomIndexOnFloor, itemIndexInRoom: itemIndexInRoom,
+      qty: qty, mfr: mfr, model: model, description: desc
+    });
+    state.order.push(id);
+    ensureCable(roomKey);
+    state.dirty = true;
+    updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
+    render();
+    addItemClose();
+  }
+  function setupAddItem(){
+    document.getElementById("addItemBtn").addEventListener("click", openAddItem);
+    document.getElementById("addItemClose").addEventListener("click", addItemClose);
+    document.getElementById("addItemCancel").addEventListener("click", addItemClose);
+    document.getElementById("addItemSave").addEventListener("click", saveAddItem);
+    document.getElementById("addRoomSel").addEventListener("change", function(){ addItemSetError(""); addItemSyncRoomFields(); });
+  }
+
   function setupBomImport(){
     var dlg = document.getElementById("bomDialog");
     var body = document.getElementById("bomBody");
     var fileInput = document.getElementById("bomFileInput");
     document.getElementById("bomBtn").addEventListener("click", bomOpen);
+    setupAddItem();
     document.getElementById("bomClose").addEventListener("click", bomClose);
     document.getElementById("bomBack").addEventListener("click", function(){ imp.step = Math.max(1, imp.step - 1); renderBom(); body.scrollTop = 0; });
     document.getElementById("bomNext").addEventListener("click", function(){
@@ -4837,6 +4971,8 @@
     cloudNotifyProjectMetaChanged = itNotifyProjectMetaChanged;
     cloudNotifyBulkItemsReplaced = itNotifyBulkItemsReplaced;
     cloudCreateProjectFromBom = itCreateProjectFromBom;
+    // manual room/item adds are only saved while a project is open and editable
+    cloudEditAllowed = function(){ return !!(itc.projectId && !itc.readOnly); };
     window.addEventListener("beforeunload", function(e){
       if (!itIsDirty) return;
       e.preventDefault(); e.returnValue = "";
@@ -5458,7 +5594,12 @@
     var list = itEl("itDashList");
     var sel = itEl("itDashSort");
     var mode = sel ? sel.value : "pct_asc";
-    list.innerHTML = itDashSortCards(itDashCards, mode).map(function(c){
+    var searchEl = itEl("itDashSearch");
+    var q = searchEl ? searchEl.value.trim().toLowerCase() : "";
+    var shown = itDashSortCards(itDashCards, mode).filter(function(c){ return !q || itDashCardName(c).toLowerCase().indexOf(q) !== -1; });
+    if (itDashCards.length && !shown.length) itDashMsg("No projects match “" + searchEl.value.trim() + "”.");
+    else if (itDashCards.length) itDashMsg("");
+    list.innerHTML = shown.map(function(c){
       var p = c.project, s = c.stats;
       var pMeta = p.meta || {};
       var name = pMeta.projectName || p.name || "Untitled project";
@@ -5503,6 +5644,8 @@
   if (itDashboardBtnEl) itDashboardBtnEl.addEventListener("click", itOpenDashboardModal);
   var itDashboardCloseEl = itEl("itDashboardClose");
   if (itDashboardCloseEl) itDashboardCloseEl.addEventListener("click", itCloseDashboardModal);
+  var itDashSearchEl = itEl("itDashSearch");
+  if (itDashSearchEl) itDashSearchEl.addEventListener("input", itDashPaint);
   var itDashSortEl = itEl("itDashSort");
   if (itDashSortEl){
     try { var savedDashSort = localStorage.getItem(ITD_SORT_KEY); if (savedDashSort) itDashSortEl.value = savedDashSort; } catch (e) {}
