@@ -363,6 +363,17 @@
     box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
   }
   #bomDialog::backdrop{ background:rgba(12,24,48,.45); }
+  #addItemDialog{
+    width:min(560px, calc(100vw - 24px)); max-height:calc(100vh - 32px); padding:0;
+    border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text);
+    box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
+  }
+  #addItemDialog::backdrop{ background:rgba(12,24,48,.45); }
+  .add-body{ display:grid; grid-template-columns:1fr 1fr; gap:12px 14px; align-content:start; }
+  .add-body .add-wide{ grid-column:1 / -1; }
+  .add-field{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-muted); }
+  .add-field select{ font:inherit; padding:6px 8px; border:1px solid var(--border); border-radius:7px; background:var(--surface); color:var(--text); }
+  .add-err{ grid-column:1 / -1; color:var(--danger); font-weight:600; min-height:18px; margin:0; }
   .bom-shell{ display:flex; flex-direction:column; max-height:calc(100vh - 34px); }
   .bom-head{ display:flex; align-items:center; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border-soft); flex-wrap:wrap; }
   .bom-head h2{ font-size:20px; }
@@ -727,17 +738,24 @@
   /* Wide enough for 3 cards per row at a comfortable card width before the
      grid wraps itself down to 2, then 1, on a narrower window - no media
      query needed, auto-fill + minmax does that on its own. */
-  .it-dashboard-panel{max-width:960px;}
-  .it-dash-list{max-height:640px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;align-content:start;}
+  .it-dashboard-panel{max-width:1280px;}
+  .it-dash-list{max-height:calc(100vh - 230px);overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;align-content:start;}
   .it-dash-card{
-    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius);padding:7px 9px;background:var(--surface);
     cursor:pointer;text-align:left;font:inherit;color:inherit;
   }
   .it-dash-card:hover{border-color:var(--navy);box-shadow:var(--shadow);}
   .it-dash-name{
-    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;margin-bottom:8px;
+    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:13.5px;margin-bottom:4px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  /* compact card: the same numbers, packed tighter so more projects fit on one screen */
+  .it-dash-card .pct{font-size:20px;line-height:1;}
+  .it-dash-card .pct-label{font-size:9px;}
+  .it-dash-card .overall{gap:8px;}
+  .it-dash-card .overall-bar .track{height:6px;}
+  .it-dash-card .counts{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin-top:3px;font-size:10.5px;}
+  .it-dash-card .counts span{white-space:nowrap;}
   /* reuses the exact same .overall/.pct/.overall-bar family the live
      per-project header already uses, so a project's card here looks
      identical to its own dashboard once opened - just without the
@@ -746,8 +764,23 @@
   .it-dash-card .overall-bar{width:100%;}
   .it-dash-sort{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;color:var(--text-muted);}
   .it-dash-sort select{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
+  .it-dash-sort input[type="search"]{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);margin-left:auto;width:220px;max-width:100%;}
   .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
   .it-dash-msg.bad{color:var(--danger);font-weight:600;}
+  .it-dash-updated{font-size:12px;color:var(--text-muted);margin-left:8px;white-space:nowrap;}
+  .it-dash-fs-btn{font:inherit;font-size:12.5px;padding:5px 10px;margin-left:auto;margin-right:8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);cursor:pointer;white-space:nowrap;}
+  .it-dash-fs-btn:hover{border-color:var(--navy);}
+
+  /* full screen for monitoring: the panel fills the screen and the card grid takes the height */
+  .it-dashboard-panel:fullscreen,
+  .it-dash-expanded .it-dashboard-panel{max-width:none;width:100vw;height:100vh;max-height:100vh;border-radius:0;overflow:auto;}
+  .it-dashboard-panel:fullscreen .it-dash-list,
+  .it-dash-expanded .it-dashboard-panel .it-dash-list{max-height:calc(100vh - 170px);}
+
+  /* view-only dashboard account: nothing on screen but the Projects dashboard */
+  body.it-role-dashboard > :not(#itDashboardBackdrop){display:none !important;}
+  body.it-role-dashboard #itDashboardClose{display:none;}
+  body.it-role-dashboard #itRoleBanner{display:inline-flex;}
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1c2331">
@@ -817,6 +850,7 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
         Load BOM
       </button>
+      <button class="tool-btn" id="addItemBtn" type="button">+ Add room / item</button>
       <input type="file" id="bomFileInput" accept=".xlsx,.xlsm,.csv,.tsv,.txt" multiple hidden>
       <button class="tool-btn" id="loadBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V9"/><path d="M7 14l5-5 5 5"/><path d="M5 21h14"/></svg>
@@ -947,6 +981,7 @@
             <option value="staff">Staff (full access)</option>
             <option value="viewer-locked">Viewer - one project (view/sort/PDF only)</option>
             <option value="viewer-any">PC - all projects</option>
+            <option value="dashboard">Dashboard (view-only, no edits)</option>
           </select>
         </label>
         <label class="it-mu-new-project" id="itMuNewProjectWrap">Project<select id="itMuNewProject"></select></label>
@@ -961,11 +996,12 @@
   <div class="it-modal-panel it-dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="itDashboardTitle">
     <div class="it-modal-head">
       <h2 id="itDashboardTitle">Projects dashboard</h2>
+      <button class="it-dash-fs-btn" id="itDashFullBtn" type="button" title="Show the dashboard full screen">Full screen</button>
       <button class="it-icon-btn" id="itDashboardClose" title="Close" aria-label="Close" type="button">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
       </button>
     </div>
-    <p class="it-modal-sub">Full-access staff only. Every active project's progress at a glance, busiest first.</p>
+    <p class="it-modal-sub">Staff and dashboard accounts. Every active project's progress at a glance.</p>
     <div class="it-dash-sort">
       <label for="itDashSort">Sort by</label>
       <select id="itDashSort">
@@ -974,6 +1010,8 @@
         <option value="name_asc">Name (A–Z)</option>
         <option value="name_desc">Name (Z–A)</option>
       </select>
+      <input type="search" id="itDashSearch" placeholder="Search projects" autocomplete="off" aria-label="Search projects">
+      <span class="it-dash-updated" id="itDashUpdated"></span>
     </div>
     <div class="it-dash-list" id="itDashList"></div>
     <div class="it-dash-msg" id="itDashMsg" aria-live="polite"></div>
@@ -993,6 +1031,35 @@
       <span id="bomStatus" class="mono"></span>
       <button type="button" class="tool-btn" id="bomBack">Back</button>
       <button type="button" class="tool-btn tool-btn-primary" id="bomNext">Next</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="addItemDialog" aria-labelledby="addItemTitle">
+  <div class="bom-shell">
+    <div class="bom-head">
+      <h2 id="addItemTitle">Add room / item</h2>
+      <button type="button" class="bom-x" id="addItemClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="bom-body add-body">
+      <label class="add-field add-wide">Room
+        <select id="addRoomSel"></select>
+      </label>
+      <div class="add-wide add-body" id="addNewRoom" style="padding:0">
+        <label class="add-field">Floor<input class="bom-in" id="addFloor" value="1"></label>
+        <label class="add-field">Room #<input class="bom-in" id="addRoomNo" placeholder="e.g. 101 or Main"></label>
+        <label class="add-field add-wide">Room type<input class="bom-in" id="addRoomType" placeholder="e.g. Conference Room"></label>
+      </div>
+      <label class="add-field">Mfr<input class="bom-in" id="addMfr"></label>
+      <label class="add-field">Model<input class="bom-in" id="addModel"></label>
+      <label class="add-field add-wide">Description<input class="bom-in" id="addDesc"></label>
+      <label class="add-field">Qty<input class="bom-in" id="addQty" type="number" min="1" value="1"></label>
+      <p class="add-err" id="addErr" role="alert"></p>
+    </div>
+    <div class="bom-foot">
+      <span class="mono" id="addHint"></span>
+      <button type="button" class="tool-btn" id="addItemCancel">Cancel</button>
+      <button type="button" class="tool-btn tool-btn-primary" id="addItemSave">Add</button>
     </div>
   </div>
 </dialog>
@@ -1017,6 +1084,7 @@
   var cloudCreateProjectFromBom = function(){ return false; };
   var cloudNotifyStatusChanged = function(){};
   var cloudNotifyCableStatusChanged = function(){};
+  var cloudEditAllowed = function(){ return true; };
 
   var ITEMS = []; // starts blank — build a schedule with Load BOM, or open a saved tracker .html
 
@@ -3688,11 +3756,101 @@
     imp = null;
   }
 
+  // ---- Add a room (with its first line item) or a line item to an existing room, by hand ----
+  function addRoomsOnHand(){
+    var out = [], seen = {};
+    state.order.forEach(function(id){
+      var it = state.items[id];
+      if(!it || seen[it.roomKey]) return;
+      seen[it.roomKey] = true;
+      out.push({ key: it.roomKey, floor: it.floor, roomNumber: it.roomNumber, roomType: it.roomType, roomIndexOnFloor: it.roomIndexOnFloor });
+    });
+    return out;
+  }
+  function addItemSetError(msg){ document.getElementById("addErr").textContent = msg || ""; }
+  function addItemSyncRoomFields(){
+    var isNew = document.getElementById("addRoomSel").value === "__new";
+    document.getElementById("addNewRoom").style.display = isNew ? "" : "none";
+    document.getElementById("addHint").textContent = isNew ? "New room + first line item" : "New line item in this room";
+  }
+  function openAddItem(){
+    if(!cloudEditAllowed()){
+      alert("Open a project first. Viewers can't add rooms or items.");
+      return;
+    }
+    var sel = document.getElementById("addRoomSel");
+    var rooms = addRoomsOnHand();
+    sel.innerHTML = '<option value="__new">+ New room</option>' + rooms.map(function(r){
+      return '<option value="' + escapeHtml(r.key) + '">Floor ' + escapeHtml(String(r.floor)) + " · Room " + escapeHtml(String(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
+    }).join("");
+    sel.value = "__new";
+    ["addRoomNo", "addRoomType", "addMfr", "addModel", "addDesc"].forEach(function(id){ document.getElementById(id).value = ""; });
+    document.getElementById("addFloor").value = "1";
+    document.getElementById("addQty").value = "1";
+    addItemSetError("");
+    addItemSyncRoomFields();
+    document.getElementById("addItemDialog").showModal();
+  }
+  function addItemClose(){ document.getElementById("addItemDialog").close(); }
+  function saveAddItem(){
+    var val = function(id){ return document.getElementById(id).value.trim(); };
+    var sel = document.getElementById("addRoomSel").value;
+    var mfr = val("addMfr"), model = val("addModel"), desc = val("addDesc");
+    var qty = parseInt(val("addQty"), 10);
+    if(!(qty >= 1)){ addItemSetError("Qty must be 1 or more."); return; }
+    if(!model && !desc){ addItemSetError("Enter a model or a description."); return; }
+
+    var floor, roomNumber, roomType, roomKey, roomIndexOnFloor;
+    if(sel === "__new"){
+      var floorRaw = val("addFloor");
+      if(!floorRaw){ addItemSetError("Enter a floor."); return; }
+      floor = toFloorValue(floorRaw);
+      if(floor == null) floor = floorRaw;
+      roomNumber = val("addRoomNo");
+      if(!roomNumber){ addItemSetError("Enter a room #."); return; }
+      roomKey = String(floor) + "-" + roomNumber;
+      var existing = addRoomsOnHand();
+      if(existing.some(function(r){ return r.key === roomKey; })){
+        addItemSetError("Room " + roomNumber + " already exists on floor " + floor + ". Pick it from the Room list.");
+        return;
+      }
+      roomType = val("addRoomType");
+      roomIndexOnFloor = existing.filter(function(r){ return String(r.floor) === String(floor); }).length + 1;
+    } else {
+      var src = addRoomsOnHand().filter(function(r){ return r.key === sel; })[0];
+      if(!src){ addItemSetError("That room is no longer in the schedule. Pick another."); return; }
+      floor = src.floor; roomNumber = src.roomNumber; roomType = src.roomType; roomKey = src.key; roomIndexOnFloor = src.roomIndexOnFloor;
+    }
+
+    var itemIndexInRoom = state.order.filter(function(id){ return state.items[id] && state.items[id].roomKey === roomKey; }).length + 1;
+    var id = "man-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    state.items[id] = withDefaults({
+      id: id, floor: floor, roomNumber: String(roomNumber), roomType: roomType || "", roomKey: roomKey,
+      roomIndexOnFloor: roomIndexOnFloor, itemIndexInRoom: itemIndexInRoom,
+      qty: qty, mfr: mfr, model: model, description: desc
+    });
+    state.order.push(id);
+    ensureCable(roomKey);
+    state.dirty = true;
+    updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
+    render();
+    addItemClose();
+  }
+  function setupAddItem(){
+    document.getElementById("addItemBtn").addEventListener("click", openAddItem);
+    document.getElementById("addItemClose").addEventListener("click", addItemClose);
+    document.getElementById("addItemCancel").addEventListener("click", addItemClose);
+    document.getElementById("addItemSave").addEventListener("click", saveAddItem);
+    document.getElementById("addRoomSel").addEventListener("change", function(){ addItemSetError(""); addItemSyncRoomFields(); });
+  }
+
   function setupBomImport(){
     var dlg = document.getElementById("bomDialog");
     var body = document.getElementById("bomBody");
     var fileInput = document.getElementById("bomFileInput");
     document.getElementById("bomBtn").addEventListener("click", bomOpen);
+    setupAddItem();
     document.getElementById("bomClose").addEventListener("click", bomClose);
     document.getElementById("bomBack").addEventListener("click", function(){ imp.step = Math.max(1, imp.step - 1); renderBom(); body.scrollTop = 0; });
     document.getElementById("bomNext").addEventListener("click", function(){
@@ -4837,6 +4995,8 @@
     cloudNotifyProjectMetaChanged = itNotifyProjectMetaChanged;
     cloudNotifyBulkItemsReplaced = itNotifyBulkItemsReplaced;
     cloudCreateProjectFromBom = itCreateProjectFromBom;
+    // manual room/item adds are only saved while a project is open and editable
+    cloudEditAllowed = function(){ return !!(itc.projectId && !itc.readOnly); };
     window.addEventListener("beforeunload", function(e){
       if (!itIsDirty) return;
       e.preventDefault(); e.returnValue = "";
@@ -4900,15 +5060,17 @@
   //    no edits of any kind, and Excel export / Save progress are removed
   //    entirely (see it-roles.css).
   function itApplyRoleUi(role, locked){
-    document.body.classList.remove("it-role-viewer", "it-locked-project");
-    itc.readOnly = role === "viewer" && locked;
+    document.body.classList.remove("it-role-viewer", "it-locked-project", "it-role-dashboard");
+    itc.readOnly = (role === "viewer" && locked) || role === "dashboard";
     if (role === "viewer"){
       document.body.classList.add("it-role-viewer");
       if (locked) document.body.classList.add("it-locked-project");
     }
+    // view-only dashboard account: nothing but the Projects dashboard (see it-roles.css)
+    if (role === "dashboard") document.body.classList.add("it-role-dashboard");
     var banner = itEl("itRoleBanner");
     if (banner){
-      banner.textContent = role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
+      banner.textContent = role === "dashboard" ? "Dashboard — view only" : role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
     }
   }
 
@@ -4926,6 +5088,12 @@
       var projectId = pr.data && pr.data.project_id;
       itc.role = role;
 
+      if (role === "dashboard"){
+        // straight to the full dashboard - no project list, no project opening
+        itApplyRoleUi(role, false);
+        itOpenDashboardModal();
+        return;
+      }
       if (role === "viewer" && !projectId){
         // read-only, but can browse/open any project - same navigation as staff
         itApplyRoleUi(role, false);
@@ -5132,12 +5300,14 @@
 
   function itMuKind(u){
     if (u.role === "viewer") return u.projectId ? "viewer-locked" : "viewer-any";
+    if (u.role === "dashboard") return "dashboard";
     return "staff";
   }
   function itMuKindNeedsProject(kind){ return kind === "viewer-locked"; }
   function itMuRoleAndProject(kind, projectId){
     if (kind === "viewer-locked") return {role: "viewer", projectId: projectId || null};
     if (kind === "viewer-any") return {role: "viewer", projectId: null};
+    if (kind === "dashboard") return {role: "dashboard", projectId: null};
     return {role: "staff", projectId: null};
   }
   function itMuProjectOptionsHtml(selectedId){
@@ -5179,6 +5349,7 @@
             '<option value="staff"' + (kind === "staff" ? " selected" : "") + '>Staff (full access)</option>' +
             '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project (view/sort/PDF only)</option>' +
             '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>PC - all projects</option>' +
+            '<option value="dashboard"' + (kind === "dashboard" ? " selected" : "") + '>Dashboard (view-only, no edits)</option>' +
           '</select>' +
           /* visibility, not display:none - a display:none child is removed
              from grid layout entirely, which would shift Save/Delete left
@@ -5404,7 +5575,8 @@
   // client-side, rather than one query per project.
   function itLoadDashboard(){
     var list = itEl("itDashList");
-    list.textContent = "Loading...";
+    // on the auto-refresh the cards already on screen stay put until the new numbers arrive
+    if (!itDashCards.length) list.textContent = "Loading...";
     itDashMsg("");
     return Promise.all([
       itc.sb.from("it_projects").select("id,name,meta").eq("deleted", false).eq("archived", false),
@@ -5437,6 +5609,8 @@
       return {project: p, stats: stats};
     });
     itDashPaint();
+    var updatedEl = itEl("itDashUpdated");
+    if (updatedEl) updatedEl.textContent = "Updated " + new Date().toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   }
 
   // Cards from the last load are kept so changing the sort doesn't re-query.
@@ -5458,7 +5632,12 @@
     var list = itEl("itDashList");
     var sel = itEl("itDashSort");
     var mode = sel ? sel.value : "pct_asc";
-    list.innerHTML = itDashSortCards(itDashCards, mode).map(function(c){
+    var searchEl = itEl("itDashSearch");
+    var q = searchEl ? searchEl.value.trim().toLowerCase() : "";
+    var shown = itDashSortCards(itDashCards, mode).filter(function(c){ return !q || itDashCardName(c).toLowerCase().indexOf(q) !== -1; });
+    if (itDashCards.length && !shown.length) itDashMsg("No projects match “" + searchEl.value.trim() + "”.");
+    else if (itDashCards.length) itDashMsg("");
+    list.innerHTML = shown.map(function(c){
       var p = c.project, s = c.stats;
       var pMeta = p.meta || {};
       var name = pMeta.projectName || p.name || "Untitled project";
@@ -5480,15 +5659,55 @@
     }).join("");
   }
 
+  // Refreshes the numbers every minute while the dashboard is open, so it can
+  // sit on a screen for monitoring without anyone reloading it.
+  var ITD_REFRESH_MS = 60000;
+  var itDashRefreshTimer = null;
   function itOpenDashboardModal(){
     itEl("itDashboardBackdrop").hidden = false;
     itLoadDashboard();
+    clearInterval(itDashRefreshTimer);
+    itDashRefreshTimer = setInterval(function(){
+      if (!itEl("itDashboardBackdrop").hidden) itLoadDashboard();
+    }, ITD_REFRESH_MS);
   }
-  function itCloseDashboardModal(){ itEl("itDashboardBackdrop").hidden = true; }
+  function itCloseDashboardModal(){
+    itEl("itDashboardBackdrop").hidden = true;
+    clearInterval(itDashRefreshTimer);
+    itDashRefreshTimer = null;
+    if (document.fullscreenElement) document.exitFullscreen().catch(function(){});
+    itEl("itDashboardBackdrop").classList.remove("it-dash-expanded");
+    itUpdateDashFullBtn();
+  }
+
+  // Full screen: the browser's own full-screen mode when it's allowed, otherwise
+  // the dashboard just fills the window (class fallback, same look).
+  function itUpdateDashFullBtn(){
+    var on = !!document.fullscreenElement || itEl("itDashboardBackdrop").classList.contains("it-dash-expanded");
+    var btn = itEl("itDashFullBtn");
+    if (btn) btn.textContent = on ? "Exit full screen" : "Full screen";
+  }
+  function itToggleDashFull(){
+    var bd = itEl("itDashboardBackdrop");
+    var panel = bd.querySelector(".it-dashboard-panel");
+    if (document.fullscreenElement){ document.exitFullscreen().catch(function(){}); return; }
+    if (bd.classList.contains("it-dash-expanded")){ bd.classList.remove("it-dash-expanded"); itUpdateDashFullBtn(); return; }
+    if (panel && panel.requestFullscreen){
+      panel.requestFullscreen().catch(function(){ bd.classList.add("it-dash-expanded"); itUpdateDashFullBtn(); });
+    } else {
+      bd.classList.add("it-dash-expanded");
+    }
+    itUpdateDashFullBtn();
+  }
+  var itDashFullBtnEl = itEl("itDashFullBtn");
+  if (itDashFullBtnEl) itDashFullBtnEl.addEventListener("click", itToggleDashFull);
+  document.addEventListener("fullscreenchange", itUpdateDashFullBtn);
 
   document.addEventListener("click", function(ev){
     var openBtn = ev.target.closest && ev.target.closest("[data-itd-open]");
     if (!openBtn) return;
+    // a dashboard account only watches the numbers - project cards don't open anything
+    if (document.body.classList.contains("it-role-dashboard")) return;
     var projectId = openBtn.dataset.itdOpen;
     openBtn.disabled = true;
     itc.sb.from("it_projects").select("id,name,meta").eq("id", projectId).maybeSingle().then(function(pr){
@@ -5503,6 +5722,8 @@
   if (itDashboardBtnEl) itDashboardBtnEl.addEventListener("click", itOpenDashboardModal);
   var itDashboardCloseEl = itEl("itDashboardClose");
   if (itDashboardCloseEl) itDashboardCloseEl.addEventListener("click", itCloseDashboardModal);
+  var itDashSearchEl = itEl("itDashSearch");
+  if (itDashSearchEl) itDashSearchEl.addEventListener("input", itDashPaint);
   var itDashSortEl = itEl("itDashSort");
   if (itDashSortEl){
     try { var savedDashSort = localStorage.getItem(ITD_SORT_KEY); if (savedDashSort) itDashSortEl.value = savedDashSort; } catch (e) {}
