@@ -760,6 +760,20 @@
   .it-dash-sort input[type="search"]{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);margin-left:auto;width:220px;max-width:100%;}
   .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
   .it-dash-msg.bad{color:var(--danger);font-weight:600;}
+  .it-dash-updated{font-size:12px;color:var(--text-muted);margin-left:8px;white-space:nowrap;}
+  .it-dash-fs-btn{font:inherit;font-size:12.5px;padding:5px 10px;margin-left:auto;margin-right:8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);cursor:pointer;white-space:nowrap;}
+  .it-dash-fs-btn:hover{border-color:var(--navy);}
+
+  /* full screen for monitoring: the panel fills the screen and the card grid takes the height */
+  .it-dashboard-panel:fullscreen,
+  .it-dash-expanded .it-dashboard-panel{max-width:none;width:100vw;height:100vh;max-height:100vh;border-radius:0;overflow:auto;}
+  .it-dashboard-panel:fullscreen .it-dash-list,
+  .it-dash-expanded .it-dashboard-panel .it-dash-list{max-height:calc(100vh - 170px);}
+
+  /* view-only dashboard account: nothing on screen but the Projects dashboard */
+  body.it-role-dashboard > :not(#itDashboardBackdrop){display:none !important;}
+  body.it-role-dashboard #itDashboardClose{display:none;}
+  body.it-role-dashboard #itRoleBanner{display:inline-flex;}
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1c2331">
@@ -960,6 +974,7 @@
             <option value="staff">Staff (full access)</option>
             <option value="viewer-locked">Viewer - one project (view/sort/PDF only)</option>
             <option value="viewer-any">PC - all projects</option>
+            <option value="dashboard">Dashboard (view-only, no edits)</option>
           </select>
         </label>
         <label class="it-mu-new-project" id="itMuNewProjectWrap">Project<select id="itMuNewProject"></select></label>
@@ -974,11 +989,12 @@
   <div class="it-modal-panel it-dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="itDashboardTitle">
     <div class="it-modal-head">
       <h2 id="itDashboardTitle">Projects dashboard</h2>
+      <button class="it-dash-fs-btn" id="itDashFullBtn" type="button" title="Show the dashboard full screen">Full screen</button>
       <button class="it-icon-btn" id="itDashboardClose" title="Close" aria-label="Close" type="button">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6 6 18"></path></svg>
       </button>
     </div>
-    <p class="it-modal-sub">Full-access staff only. Every active project's progress at a glance, busiest first.</p>
+    <p class="it-modal-sub">Staff and dashboard accounts. Every active project's progress at a glance.</p>
     <div class="it-dash-sort">
       <label for="itDashSort">Sort by</label>
       <select id="itDashSort">
@@ -988,6 +1004,7 @@
         <option value="name_desc">Name (Z–A)</option>
       </select>
       <input type="search" id="itDashSearch" placeholder="Search projects" autocomplete="off" aria-label="Search projects">
+      <span class="it-dash-updated" id="itDashUpdated"></span>
     </div>
     <div class="it-dash-list" id="itDashList"></div>
     <div class="it-dash-msg" id="itDashMsg" aria-live="polite"></div>
@@ -5036,15 +5053,17 @@
   //    no edits of any kind, and Excel export / Save progress are removed
   //    entirely (see it-roles.css).
   function itApplyRoleUi(role, locked){
-    document.body.classList.remove("it-role-viewer", "it-locked-project");
-    itc.readOnly = role === "viewer" && locked;
+    document.body.classList.remove("it-role-viewer", "it-locked-project", "it-role-dashboard");
+    itc.readOnly = (role === "viewer" && locked) || role === "dashboard";
     if (role === "viewer"){
       document.body.classList.add("it-role-viewer");
       if (locked) document.body.classList.add("it-locked-project");
     }
+    // view-only dashboard account: nothing but the Projects dashboard (see it-roles.css)
+    if (role === "dashboard") document.body.classList.add("it-role-dashboard");
     var banner = itEl("itRoleBanner");
     if (banner){
-      banner.textContent = role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
+      banner.textContent = role === "dashboard" ? "Dashboard — view only" : role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
     }
   }
 
@@ -5062,6 +5081,12 @@
       var projectId = pr.data && pr.data.project_id;
       itc.role = role;
 
+      if (role === "dashboard"){
+        // straight to the full dashboard - no project list, no project opening
+        itApplyRoleUi(role, false);
+        itOpenDashboardModal();
+        return;
+      }
       if (role === "viewer" && !projectId){
         // read-only, but can browse/open any project - same navigation as staff
         itApplyRoleUi(role, false);
@@ -5268,12 +5293,14 @@
 
   function itMuKind(u){
     if (u.role === "viewer") return u.projectId ? "viewer-locked" : "viewer-any";
+    if (u.role === "dashboard") return "dashboard";
     return "staff";
   }
   function itMuKindNeedsProject(kind){ return kind === "viewer-locked"; }
   function itMuRoleAndProject(kind, projectId){
     if (kind === "viewer-locked") return {role: "viewer", projectId: projectId || null};
     if (kind === "viewer-any") return {role: "viewer", projectId: null};
+    if (kind === "dashboard") return {role: "dashboard", projectId: null};
     return {role: "staff", projectId: null};
   }
   function itMuProjectOptionsHtml(selectedId){
@@ -5315,6 +5342,7 @@
             '<option value="staff"' + (kind === "staff" ? " selected" : "") + '>Staff (full access)</option>' +
             '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project (view/sort/PDF only)</option>' +
             '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>PC - all projects</option>' +
+            '<option value="dashboard"' + (kind === "dashboard" ? " selected" : "") + '>Dashboard (view-only, no edits)</option>' +
           '</select>' +
           /* visibility, not display:none - a display:none child is removed
              from grid layout entirely, which would shift Save/Delete left
@@ -5540,7 +5568,8 @@
   // client-side, rather than one query per project.
   function itLoadDashboard(){
     var list = itEl("itDashList");
-    list.textContent = "Loading...";
+    // on the auto-refresh the cards already on screen stay put until the new numbers arrive
+    if (!itDashCards.length) list.textContent = "Loading...";
     itDashMsg("");
     return Promise.all([
       itc.sb.from("it_projects").select("id,name,meta").eq("deleted", false).eq("archived", false),
@@ -5573,6 +5602,8 @@
       return {project: p, stats: stats};
     });
     itDashPaint();
+    var updatedEl = itEl("itDashUpdated");
+    if (updatedEl) updatedEl.textContent = "Updated " + new Date().toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   }
 
   // Cards from the last load are kept so changing the sort doesn't re-query.
@@ -5621,15 +5652,55 @@
     }).join("");
   }
 
+  // Refreshes the numbers every minute while the dashboard is open, so it can
+  // sit on a screen for monitoring without anyone reloading it.
+  var ITD_REFRESH_MS = 60000;
+  var itDashRefreshTimer = null;
   function itOpenDashboardModal(){
     itEl("itDashboardBackdrop").hidden = false;
     itLoadDashboard();
+    clearInterval(itDashRefreshTimer);
+    itDashRefreshTimer = setInterval(function(){
+      if (!itEl("itDashboardBackdrop").hidden) itLoadDashboard();
+    }, ITD_REFRESH_MS);
   }
-  function itCloseDashboardModal(){ itEl("itDashboardBackdrop").hidden = true; }
+  function itCloseDashboardModal(){
+    itEl("itDashboardBackdrop").hidden = true;
+    clearInterval(itDashRefreshTimer);
+    itDashRefreshTimer = null;
+    if (document.fullscreenElement) document.exitFullscreen().catch(function(){});
+    itEl("itDashboardBackdrop").classList.remove("it-dash-expanded");
+    itUpdateDashFullBtn();
+  }
+
+  // Full screen: the browser's own full-screen mode when it's allowed, otherwise
+  // the dashboard just fills the window (class fallback, same look).
+  function itUpdateDashFullBtn(){
+    var on = !!document.fullscreenElement || itEl("itDashboardBackdrop").classList.contains("it-dash-expanded");
+    var btn = itEl("itDashFullBtn");
+    if (btn) btn.textContent = on ? "Exit full screen" : "Full screen";
+  }
+  function itToggleDashFull(){
+    var bd = itEl("itDashboardBackdrop");
+    var panel = bd.querySelector(".it-dashboard-panel");
+    if (document.fullscreenElement){ document.exitFullscreen().catch(function(){}); return; }
+    if (bd.classList.contains("it-dash-expanded")){ bd.classList.remove("it-dash-expanded"); itUpdateDashFullBtn(); return; }
+    if (panel && panel.requestFullscreen){
+      panel.requestFullscreen().catch(function(){ bd.classList.add("it-dash-expanded"); itUpdateDashFullBtn(); });
+    } else {
+      bd.classList.add("it-dash-expanded");
+    }
+    itUpdateDashFullBtn();
+  }
+  var itDashFullBtnEl = itEl("itDashFullBtn");
+  if (itDashFullBtnEl) itDashFullBtnEl.addEventListener("click", itToggleDashFull);
+  document.addEventListener("fullscreenchange", itUpdateDashFullBtn);
 
   document.addEventListener("click", function(ev){
     var openBtn = ev.target.closest && ev.target.closest("[data-itd-open]");
     if (!openBtn) return;
+    // a dashboard account only watches the numbers - project cards don't open anything
+    if (document.body.classList.contains("it-role-dashboard")) return;
     var projectId = openBtn.dataset.itdOpen;
     openBtn.disabled = true;
     itc.sb.from("it_projects").select("id,name,meta").eq("id", projectId).maybeSingle().then(function(pr){
