@@ -738,17 +738,24 @@
   /* Wide enough for 3 cards per row at a comfortable card width before the
      grid wraps itself down to 2, then 1, on a narrower window - no media
      query needed, auto-fill + minmax does that on its own. */
-  .it-dashboard-panel{max-width:960px;}
-  .it-dash-list{max-height:640px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;align-content:start;}
+  .it-dashboard-panel{max-width:1280px;}
+  .it-dash-list{max-height:calc(100vh - 230px);overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;align-content:start;}
   .it-dash-card{
-    border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius);padding:7px 9px;background:var(--surface);
     cursor:pointer;text-align:left;font:inherit;color:inherit;
   }
   .it-dash-card:hover{border-color:var(--navy);box-shadow:var(--shadow);}
   .it-dash-name{
-    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:15px;margin-bottom:8px;
+    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:13.5px;margin-bottom:4px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  /* compact card: the same numbers, packed tighter so more projects fit on one screen */
+  .it-dash-card .pct{font-size:20px;line-height:1;}
+  .it-dash-card .pct-label{font-size:9px;}
+  .it-dash-card .overall{gap:8px;}
+  .it-dash-card .overall-bar .track{height:6px;}
+  .it-dash-card .counts{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin-top:3px;font-size:10.5px;}
+  .it-dash-card .counts span{white-space:nowrap;}
   /* reuses the exact same .overall/.pct/.overall-bar family the live
      per-project header already uses, so a project's card here looks
      identical to its own dashboard once opened - just without the
@@ -3992,6 +3999,8 @@
     syncedCable: new Map(),   // roomKey -> {json, ts}
     metaBase: {},             // {projectName, dataSourceNote, jobAddress, jobNumber} the server last confirmed
     maxPos: 0, live: false, pushing: false, pushAgain: false, pulling: false, pullAgain: false,
+    pushSeq: 0,               // goes up each time a push finishes (lets a load notice it is out of date)
+    pullStarted: 0,           // when the load now running began
     pushTimer: null, retryTimer: null, applyTimer: null, localSeed: null,
     clientId: "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
   };
@@ -4106,7 +4115,13 @@
       itc.jobNumber = c.jobNumber || "";
       itc.metaBase = c.metaBase || {};
       itc.maxPos = Number(c.maxPos) || 0;
-      itc.syncedItems = new Map(c.syncedItems || []);
+      // re-written through itItemJson so a copy saved by an older version
+      // (different field order) still compares equal to an untouched item
+      itc.syncedItems = new Map((c.syncedItems || []).map(function(e){
+        var s = e[1] || {}, json = "";
+        try{ if (s.json) json = itItemJson(JSON.parse(s.json)); }catch(err){}
+        return [e[0], {json: json, pos: s.pos, ts: s.ts}];
+      }));
       itc.syncedCable = new Map(c.syncedCable || []);
       return c;
     }catch(e){ return null; }
@@ -4140,7 +4155,7 @@
     if (base && base.ts && rts && rts < base.ts) return false;
     if (typeof rpos === "number" && rpos > itc.maxPos) itc.maxPos = rpos;
     var rnorm = withDefaults(rdata);
-    var rjson = JSON.stringify(rnorm);
+    var rjson = itItemJson(rnorm);
     var local = state.items[id];
     if (!local){
       if (base) return false; // deleted here, delete is still on its way out
@@ -4155,12 +4170,13 @@
     ITEM_ALL_FIELDS.forEach(function(k){
       merged[k] = JSON.stringify(local[k]) !== JSON.stringify(baseObj[k]) ? local[k] : rnorm[k];
     });
-    var changed = JSON.stringify(merged) !== JSON.stringify(local);
+    var changed = itItemJson(merged) !== itItemJson(local);
     state.items[id] = merged;
-    // the recorded "base" must match what's now actually in state.items[id]
-    // (the merged result), not the raw incoming row - otherwise the next
-    // diff compares local edits against a baseline that was never real
-    itc.syncedItems.set(id, {json: JSON.stringify(merged), pos: rpos, ts: rts});
+    // The recorded "base" is what the server has - NOT the merged result. A
+    // field changed here and not sent yet still differs from it, so the next
+    // push sends it. (Recording "merged" made an unsent change look already
+    // saved: it was never sent, and the next sync put the old value back.)
+    itc.syncedItems.set(id, {json: rjson, pos: rpos, ts: rts});
     return changed;
   }
   function itRemoveItemLocally(id){
@@ -4183,40 +4199,60 @@
     if (!base) base = {json: rjson, ts: rts};
     var baseObj = {};
     try{ baseObj = JSON.parse(base.json); }catch(e){}
-    var merged = {};
+    var merged = {}, remote = {};
     CABLE_FIELDS.forEach(function(k){
+      remote[k] = rnorm[k];
       merged[k] = JSON.stringify(local[k]) !== JSON.stringify(baseObj[k]) ? local[k] : rnorm[k];
     });
     var changed = JSON.stringify(merged) !== JSON.stringify(local);
     state.cable[roomKey] = merged;
-    itc.syncedCable.set(roomKey, {json: JSON.stringify(merged), ts: rts});
+    // base = what the server has, not the merged result (see itMergeRemoteItem)
+    itc.syncedCable.set(roomKey, {json: JSON.stringify(remote), ts: rts});
     return changed;
   }
 
   var ITEM_ALL_FIELDS = ITEM_BASE_FIELDS.concat(["inScope", "status", "notes", "updatedAt"]);
+  // One item as text, always with the same fields in the same order, so two
+  // copies can be compared for "has this changed?". Plain JSON.stringify
+  // isn't safe for that: the same item comes out in a different field order
+  // after a reload from this device's saved copy, which made every item
+  // look edited and got the whole (possibly out-of-date) saved copy sent
+  // back over what everyone else had done since.
+  function itItemJson(d){
+    var out = {};
+    ITEM_ALL_FIELDS.forEach(function(k){ out[k] = d[k]; });
+    return JSON.stringify(out);
+  }
   var CABLE_FIELDS = ["pulled", "terminated", "tested", "pulledNotes", "terminatedNotes", "testedNotes"];
 
   function itMergeRemoteMeta(remoteMeta){
     var rm = remoteMeta || {};
-    if (state.projectName === (itc.metaBase.projectName || "")) {
-      if (rm.projectName) setProjectName(rm.projectName);
-    }
+    var base = itc.metaBase || {};
     var curNote = (itEl("dataSourceNote") || {}).textContent || "";
-    if (curNote === (itc.metaBase.dataSourceNote || "")) {
-      if (rm.dataSourceNote != null) setDataSourceNote(rm.dataSourceNote);
-    }
-    if ((itc.jobAddress || "") === (itc.metaBase.jobAddress || "")) {
-      if (rm.jobAddress != null) itc.jobAddress = rm.jobAddress;
-    }
-    if ((itc.jobNumber || "") === (itc.metaBase.jobNumber || "")) {
-      if (rm.jobNumber != null) itc.jobNumber = rm.jobNumber;
-    }
-    itc.metaBase = {
+    // a field changed here and not sent yet keeps its value AND keeps
+    // counting as unsent (its base stays what the server has), so it still
+    // goes out on the next push instead of being quietly dropped
+    var unsent = {
+      projectName: state.projectName !== (base.projectName || ""),
+      dataSourceNote: curNote !== (base.dataSourceNote || ""),
+      jobAddress: (itc.jobAddress || "") !== (base.jobAddress || ""),
+      jobNumber: (itc.jobNumber || "") !== (base.jobNumber || "")
+    };
+    if (!unsent.projectName && rm.projectName) setProjectName(rm.projectName);
+    if (!unsent.dataSourceNote && rm.dataSourceNote != null) setDataSourceNote(rm.dataSourceNote);
+    if (!unsent.jobAddress && rm.jobAddress != null) itc.jobAddress = rm.jobAddress;
+    if (!unsent.jobNumber && rm.jobNumber != null) itc.jobNumber = rm.jobNumber;
+    var now = {
       projectName: state.projectName,
       dataSourceNote: (itEl("dataSourceNote") || {}).textContent || "",
       jobAddress: itc.jobAddress || "",
       jobNumber: itc.jobNumber || ""
     };
+    itc.metaBase = {};
+    Object.keys(now).forEach(function(k){
+      var onServer = k === "projectName" ? !!rm[k] : rm[k] != null;
+      itc.metaBase[k] = !unsent[k] ? now[k] : onServer ? rm[k] : (base[k] || "");
+    });
     itRefreshJobInfoModal();
     itRenderJobInfoNote();
   }
@@ -4230,35 +4266,27 @@
     }, 60);
   }
 
-  function itReconcileItems(remoteRows){
+  // remoteRows = this project's live rows; deletedIds = {id: true} for the
+  // rows the server still has but marked deleted.
+  function itReconcileItems(remoteRows, deletedIds){
     var remoteIds = {};
     remoteRows.forEach(function(r){
       remoteIds[r.id] = true;
       itMergeRemoteItem(r.id, r.data, r.pos, r.updated_at);
     });
-    // A pull that comes back with zero rows, despite this device having
-    // previously synced a nonzero number of items for this project, is
-    // treated as a suspicious/transient read rather than as proof every
-    // item was deleted elsewhere - a momentary empty result (no error,
-    // just nothing returned) must never be enough on its own to wipe a
-    // project's local copy AND persist that wipe into the cache (see
-    // itWriteCache below, via itApplyRemoteChanges). A genuine bulk
-    // deletion done by someone else still gets picked up correctly on the
-    // very next successful pull, once remoteRows actually reflects it.
-    if (!remoteRows.length && itc.syncedItems.size > 0){
-      itStatus("bad", "Sync returned no items for this project — not clearing anything. Retrying…");
-      clearTimeout(itc.retryTimer);
-      itc.retryTimer = setTimeout(itPullAll, 4000);
-      return;
-    }
     Array.from(itc.syncedItems.keys()).forEach(function(id){
       if (remoteIds[id]) return;
       var base = itc.syncedItems.get(id), local = state.items[id];
-      if (local && JSON.stringify(local) !== base.json){
-        itc.syncedItems.set(id, {json: "", pos: base.pos, ts: base.ts}); // edited here after removed elsewhere: send it back
-      } else {
-        itRemoveItemLocally(id);
-      }
+      var editedHere = local && itItemJson(local) !== base.json;
+      // removed by someone else and not touched here since: remove it here too
+      if (!local || (deletedIds[id] && !editedHere)){ itRemoveItemLocally(id); return; }
+      // Otherwise send this device's copy back. Either it was edited here
+      // after being removed elsewhere, or the server has no record of the
+      // item at all - which a delete never causes (a deleted row stays, marked
+      // deleted), so the copy on this device is the only one left. That is
+      // how items another project overwrote (see itPushNow) come back, and
+      // why an empty answer from the server can never wipe a project here.
+      itc.syncedItems.set(id, {json: "", pos: base.pos, ts: base.ts});
     });
   }
   function itReconcileCable(remoteRows){
@@ -4271,10 +4299,12 @@
   }
 
   // ----- talking to the database -----
+  // Every row of the project, deleted ones included: itPullAll needs to tell
+  // "someone deleted this item" apart from "the server has no such item".
   function itFetchAllItems(projectId){
     var all = [], PAGE = 1000;
     function next(from){
-      return itc.sb.from("it_items").select("*").eq("project_id", projectId).eq("deleted", false)
+      return itc.sb.from("it_items").select("*").eq("project_id", projectId)
         .order("pos", {ascending: true}).order("id", {ascending: true}).range(from, from + PAGE - 1)
         .then(function(r){
           if (r.error) throw r.error;
@@ -4295,7 +4325,9 @@
     if (!itc.projectId || !itc.sb) return Promise.resolve();
     if (itc.pulling){ itc.pullAgain = true; return Promise.resolve(); }
     itc.pulling = true;
+    itc.pullStarted = Date.now();
     var projectId = itc.projectId;
+    var pushSeq = itc.pushSeq;
     return itc.sb.from("it_projects").select("*").eq("id", projectId).maybeSingle().then(function(jr){
       if (jr.error) throw jr.error;
       if (!jr.data || jr.data.deleted){ itProjectGone(); return null; }
@@ -4304,10 +4336,16 @@
       return Promise.all([itFetchAllItems(projectId), itFetchAllCable(projectId)]);
     }).then(function(res){
       if (!res || projectId !== itc.projectId) return;
-      itReconcileItems(res[0]);
+      // A change was sent while this was loading, so what just arrived may
+      // be from before it - applying it would put the old value back on
+      // screen. Load again instead.
+      if (itc.pushSeq !== pushSeq){ itc.pullAgain = true; return; }
+      var live = [], deletedIds = {};
+      res[0].forEach(function(r){ if (r.deleted) deletedIds[r.id] = true; else live.push(r); });
+      itReconcileItems(live, deletedIds);
       itReconcileCable(res[1]);
       itApplyRemoteChanges();
-      return itPushNow();
+      return itPushNow(true);
     }).catch(function(e){
       if (itIsNetworkProblem(e)) itStatusOffline();
       else itStatus("bad", "Sync problem: " + (e && e.message ? e.message : e));
@@ -4323,15 +4361,29 @@
     return out;
   }
 
-  function itPushNow(){
+  // force = send right now even if a load is running (used where waiting
+  // isn't an option: the end of a load itself, switching project, the page
+  // being hidden/closed).
+  function itPushNow(force){
     if (!itc.projectId || !itc.sb) return Promise.resolve();
+    // view-only accounts never write (the database would refuse it anyway)
+    if (itc.readOnly || itc.role === "viewer"){ itIsDirty = false; itStatusOk(); return Promise.resolve(); }
+    // A load is running: let it finish first. It merges what other people
+    // changed into this device's copy and then sends (see itPullAll) -
+    // sending first would put this device's older values over theirs. Only
+    // waits so long, so a load that never answers can't block saving.
+    if (force !== true && itc.pulling && Date.now() - itc.pullStarted < 15000){
+      clearTimeout(itc.pushTimer);
+      itc.pushTimer = setTimeout(itPushNow, 1000);
+      return Promise.resolve();
+    }
     if (itc.pushing){ itc.pushAgain = true; return Promise.resolve(); }
     var projectId = itc.projectId;
     var itemUpserts = [], sentItems = new Map(), itemDeletes = [];
     state.order.forEach(function(id){
       var d = state.items[id];
       if (!d) return;
-      var json = JSON.stringify(d);
+      var json = itItemJson(d);
       var s = itc.syncedItems.get(id);
       if (!s || s.json !== json){
         var pos = s && typeof s.pos === "number" ? s.pos : (itc.maxPos += 1);
@@ -4364,11 +4416,16 @@
     itStatus("busy", "Syncing...");
     var sb = itc.sb;
     var chain = Promise.resolve();
+    // An item's id ("itm-0001"...) is only unique inside its own project -
+    // every BOM import numbers its items from 1 - so a row is identified by
+    // project + id, never by id alone. Matching on id alone let each new
+    // project take over the rows of the one before it. (Needs
+    // fix-it-items-shared-ids.sql run once in Supabase.)
     itChunk(itemUpserts, 200).forEach(function(part){
-      chain = chain.then(function(){ return sb.from("it_items").upsert(part, {onConflict: "id"}).then(function(r){ if (r.error) throw r.error; }); });
+      chain = chain.then(function(){ return sb.from("it_items").upsert(part, {onConflict: "project_id,id"}).then(function(r){ if (r.error) throw r.error; }); });
     });
     itChunk(itemDeletes, 50).forEach(function(part){
-      chain = chain.then(function(){ return sb.from("it_items").update({deleted: true, updated_by: itc.clientId}).in("id", part).then(function(r){ if (r.error) throw r.error; }); });
+      chain = chain.then(function(){ return sb.from("it_items").update({deleted: true, updated_by: itc.clientId}).eq("project_id", projectId).in("id", part).then(function(r){ if (r.error) throw r.error; }); });
     });
     cableUpserts.forEach(function(row){
       chain = chain.then(function(){ return sb.from("it_cable").upsert(row, {onConflict: "project_id,room_key"}).then(function(r){ if (r.error) throw r.error; }); });
@@ -4384,6 +4441,7 @@
       });
     }
     return chain.then(function(){
+      itc.pushSeq += 1;
       if (projectId !== itc.projectId) return;
       sentItems.forEach(function(v, id){ if (state.items[id]) itc.syncedItems.set(id, v); });
       itemDeletes.forEach(function(id){ if (!state.items[id]) itc.syncedItems.delete(id); });
@@ -4393,6 +4451,8 @@
       itStatusOk();
     }).catch(function(e){
       if (itIsNetworkProblem(e)) itStatusOffline();
+      // 42P10 = the items table isn't keyed by project + id yet
+      else if (e && e.code === "42P10") itStatus("bad", "Not saved yet — run fix-it-items-shared-ids.sql in Supabase (will retry)");
       else itStatus("bad", "Couldn't sync: " + (e && e.message ? e.message : e) + " (will retry)");
       clearTimeout(itc.retryTimer);
       itc.retryTimer = setTimeout(itPushNow, 8000);
@@ -4414,7 +4474,7 @@
     var changed = false;
     if (rec.deleted){
       var base = itc.syncedItems.get(rec.id), local = state.items[rec.id];
-      if (local && base && JSON.stringify(local) !== base.json){
+      if (local && base && itItemJson(local) !== base.json){
         itc.syncedItems.set(rec.id, {json: "", pos: base.pos, ts: itTsMs(rec.updated_at)});
       } else if (local || base){
         itRemoveItemLocally(rec.id);
@@ -4486,7 +4546,7 @@
     if (!_skipFlush && itc.projectId && itc.projectId !== project.id && itIsDirty){
       var proceed = function(){ return itOpenProject(project, true); };
       itWriteCache();
-      return itPushNow().then(proceed, proceed);
+      return itPushNow(true).then(proceed, proceed);
     }
     itCloseChannel();
     clearTimeout(itc.pushTimer);
@@ -4497,6 +4557,7 @@
     state.items = {}; state.order = []; state.cable = {};
     itc.syncedItems = new Map(); itc.syncedCable = new Map(); itc.metaBase = {}; itc.maxPos = 0;
     itc.jobAddress = ""; itc.jobNumber = "";
+    setDataSourceNote(""); // the note left on screen by the last project isn't this one's
     var cached = itLoadCache(project.id);
     if (!cached){
       var nm = (project.meta && project.meta.projectName) || project.name || "";
@@ -4934,7 +4995,7 @@
         // phones (unlike beforeunload), so this is the real save point
         clearTimeout(itc.pushTimer);
         itWriteCache();
-        itPushNow();
+        itPushNow(true);
       }
     });
   }

@@ -1,6 +1,6 @@
 // Service worker: lets the app open offline and pick up new versions when online.
 // Bump CACHE (v1 -> v2 ...) whenever you upload a new index.html so phones refresh.
-var CACHE = "install-tracker-v7";
+var CACHE = "install-tracker-v9";
 var CORE = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png"];
 // only these outside sites are ever cached; the database (supabase.co) must never be
 var CACHEABLE_HOSTS = ["cdn.jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com"];
