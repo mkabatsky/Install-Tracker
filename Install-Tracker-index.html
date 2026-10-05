@@ -502,7 +502,7 @@
       font-family:"IBM Plex Mono", monospace; font-size:9.5px; font-weight:600;
       background:#e7ecf4; color:#16294b; border-radius:4px; padding:1px 6px; white-space:nowrap;
     }
-    #printArea .pr-mm{ color:#1c2331; font-weight:700; font-size:10px; }
+    #printArea .pr-mm{ color:#1c2331; font-weight:700; font-size:10px; white-space:nowrap; }
     #printArea .pr-desc{ color:#666a54; font-family:"IBM Plex Mono", monospace; font-size:9px; }
     #printArea .pr-status{
       display:inline-block; font-weight:600; white-space:nowrap; font-size:9.5px;
@@ -744,6 +744,8 @@
      surrounding card chrome (this already has its own) and a wider bar. */
   .it-dash-card .overall{border:none;box-shadow:none;padding:0;background:transparent;pointer-events:none;}
   .it-dash-card .overall-bar{width:100%;}
+  .it-dash-sort{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;color:var(--text-muted);}
+  .it-dash-sort select{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
   .it-dash-msg{font-size:13px;color:var(--text-muted);min-height:18px;}
   .it-dash-msg.bad{color:var(--danger);font-weight:600;}
 </style>
@@ -964,6 +966,15 @@
       </button>
     </div>
     <p class="it-modal-sub">Full-access staff only. Every active project's progress at a glance, busiest first.</p>
+    <div class="it-dash-sort">
+      <label for="itDashSort">Sort by</label>
+      <select id="itDashSort">
+        <option value="pct_asc">% complete (least first)</option>
+        <option value="pct_desc">% complete (most first)</option>
+        <option value="name_asc">Name (A–Z)</option>
+        <option value="name_desc">Name (Z–A)</option>
+      </select>
+    </div>
     <div class="it-dash-list" id="itDashList"></div>
     <div class="it-dash-msg" id="itDashMsg" aria-live="polite"></div>
   </div>
@@ -5421,15 +5432,33 @@
     var list = itEl("itDashList");
     if (!projects.length){ list.innerHTML = ""; itDashMsg("No active projects yet."); return; }
     itDashMsg("");
-    var cards = projects.map(function(p){
+    itDashCards = projects.map(function(p){
       var stats = itdComputeStats(itemsByProject[p.id] || [], cableByProject[p.id] || {});
       return {project: p, stats: stats};
     });
-    // lowest % complete first, so whichever project needs the most
-    // attention surfaces at the top instead of being buried in whatever
-    // order the database happens to return
-    cards.sort(function(a, b){ return a.stats.pct - b.stats.pct; });
-    list.innerHTML = cards.map(function(c){
+    itDashPaint();
+  }
+
+  // Cards from the last load are kept so changing the sort doesn't re-query.
+  var itDashCards = [];
+  var ITD_SORT_KEY = "itDashSort";
+  function itDashCardName(c){ var m = c.project.meta || {}; return m.projectName || c.project.name || "Untitled project"; }
+  // Default is lowest % complete first, so whichever project needs the most
+  // attention surfaces at the top instead of being buried in database order.
+  function itDashSortCards(cards, mode){
+    var byName = function(a, b){ return itDashCardName(a).localeCompare(itDashCardName(b), undefined, {sensitivity: "base"}); };
+    var sorted = cards.slice();
+    if (mode === "name_asc") sorted.sort(byName);
+    else if (mode === "name_desc") sorted.sort(function(a, b){ return byName(b, a); });
+    else if (mode === "pct_desc") sorted.sort(function(a, b){ return (b.stats.pct - a.stats.pct) || byName(a, b); });
+    else sorted.sort(function(a, b){ return (a.stats.pct - b.stats.pct) || byName(a, b); });
+    return sorted;
+  }
+  function itDashPaint(){
+    var list = itEl("itDashList");
+    var sel = itEl("itDashSort");
+    var mode = sel ? sel.value : "pct_asc";
+    list.innerHTML = itDashSortCards(itDashCards, mode).map(function(c){
       var p = c.project, s = c.stats;
       var pMeta = p.meta || {};
       var name = pMeta.projectName || p.name || "Untitled project";
@@ -5474,6 +5503,14 @@
   if (itDashboardBtnEl) itDashboardBtnEl.addEventListener("click", itOpenDashboardModal);
   var itDashboardCloseEl = itEl("itDashboardClose");
   if (itDashboardCloseEl) itDashboardCloseEl.addEventListener("click", itCloseDashboardModal);
+  var itDashSortEl = itEl("itDashSort");
+  if (itDashSortEl){
+    try { var savedDashSort = localStorage.getItem(ITD_SORT_KEY); if (savedDashSort) itDashSortEl.value = savedDashSort; } catch (e) {}
+    itDashSortEl.addEventListener("change", function(){
+      try { localStorage.setItem(ITD_SORT_KEY, itDashSortEl.value); } catch (e) {}
+      itDashPaint();
+    });
+  }
   var itDashboardBackdropEl = itEl("itDashboardBackdrop");
   if (itDashboardBackdropEl) itDashboardBackdropEl.addEventListener("click", function(ev){ if (ev.target === itDashboardBackdropEl) itCloseDashboardModal(); });
 
