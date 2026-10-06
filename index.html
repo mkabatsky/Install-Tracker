@@ -2951,7 +2951,8 @@
     var progress = parsed && parsed.progress;
     if(!progress || typeof progress !== "object") return { error: "That file doesn't contain recognizable tracker data." };
     if(Array.isArray(parsed.items) && parsed.items.length && parsed.items.every(function(it){ return it && it.id && it.roomKey != null; })){
-      loadDataset(parsed.items, parsed.projectName || state.projectName);
+      // an open cloud project keeps its own name, whatever the file was called
+      loadDataset(parsed.items, (itc && itc.projectId && state.projectName) ? state.projectName : (parsed.projectName || state.projectName));
       if(parsed.dataSourceNote) setDataSourceNote(parsed.dataSourceNote);
     }
     if(!state.order.length){
@@ -2987,6 +2988,7 @@
     }
     state.dirty = false;
     updateFileLabel();
+    cloudNotifyBulkItemsReplaced(); // save what was just loaded
     render();
     return { applied: applied, cableApplied: cableApplied };
   }
@@ -3013,6 +3015,16 @@
   // rows are the same ones that were exported in the first place.
   var EXCEL_PROGRESS_HEADER = ["Floor","Room","Room Type","#","Mfr / Model","Description","Qty","Status","Notes"];
   var EXCEL_STATUS_BY_LABEL = { "Not started":"not_started", "In progress":"in_progress", "Installed":"installed" };
+  // compares text from a spreadsheet loosely: capitals and extra spaces don't matter
+  function looseText(v){ return String(v == null ? "" : v).replace(/\s+/g, " ").trim().toLowerCase(); }
+  // a Status cell as typed by a person: "installed", "Done", "in-progress"...
+  function excelStatusFromLabel(label){
+    var t = looseText(label).replace(/[-_]/g, " ");
+    if(t === "installed" || t === "done" || t === "complete" || t === "completed") return "installed";
+    if(t === "in progress" || t === "in prog." || t === "in prog" || t === "started") return "in_progress";
+    if(t === "not started" || t === "not installed" || t === "not inst.") return "not_started";
+    return null;
+  }
 
   function applyExcelProgress(sheets){
     if(!state.order.length){
@@ -3034,6 +3046,7 @@
     var usedIds = {};
     var curFloor = null, curRoomNumber = null;
     var applied = 0, cableApplied = 0, cableTouched = {};
+    var changed = 0, unmatched = 0, unreadStatus = 0;
 
     rows.forEach(function(row){
       if(!row || !row.length) return;
@@ -3052,17 +3065,23 @@
           if(usedIds[id]) continue;
           var it = state.items[id];
           if(!it) continue;
-          if(String(it.floor) !== String(curFloor)) continue;
-          if(String(it.roomNumber) !== curRoomNumber) continue;
-          if([it.mfr, it.model].filter(Boolean).join(" · ") !== mm) continue;
-          if(String(it.description || "") !== desc) continue;
+          if(looseText(it.floor) !== looseText(curFloor)) continue;
+          if(looseText(it.roomNumber) !== looseText(curRoomNumber)) continue;
+          if(looseText([it.mfr, it.model].filter(Boolean).join(" · ")) !== looseText(mm)) continue;
+          if(looseText(it.description) !== looseText(desc)) continue;
           match = it; usedIds[id] = true; break;
         }
         if(match){
-          if(statusLabel === "Out of scope") match.inScope = false;
-          else if(EXCEL_STATUS_BY_LABEL[statusLabel]){ match.inScope = true; match.status = EXCEL_STATUS_BY_LABEL[statusLabel]; }
+          var before = JSON.stringify([match.inScope, match.status, match.notes]);
+          var newStatus = excelStatusFromLabel(statusLabel);
+          if(looseText(statusLabel) === "out of scope") match.inScope = false;
+          else if(newStatus){ match.inScope = true; match.status = newStatus; }
+          else if(statusLabel) unreadStatus++;
           if(col8 != null) match.notes = String(col8);
+          if(JSON.stringify([match.inScope, match.status, match.notes]) !== before){ match.updatedAt = new Date().toISOString(); changed++; }
           applied++;
+        } else {
+          unmatched++;
         }
         return;
       }
@@ -3072,27 +3091,35 @@
       // "Description"; anything else (a floor/room divider row) is skipped
       var label = String(col5 == null ? "" : col5).trim();
       if(col3 == null || String(col3).trim() === "" || !label || curRoomNumber == null) return;
-      var check = CABLE_CHECKS.filter(function(c){ return c.label === label; })[0];
+      var check = CABLE_CHECKS.filter(function(c){ return looseText(c.label) === looseText(label); })[0];
       if(!check) return;
       var realKey = null;
       for(var j = 0; j < state.order.length; j++){
         var itj = state.items[state.order[j]];
-        if(itj && String(itj.floor) === String(curFloor) && String(itj.roomNumber) === curRoomNumber){ realKey = itj.roomKey; break; }
+        if(itj && looseText(itj.floor) === looseText(curFloor) && looseText(itj.roomNumber) === looseText(curRoomNumber)){ realKey = itj.roomKey; break; }
       }
       if(!realKey) return;
       var valueLabel = String(col7 == null ? "" : col7).trim();
-      var opt = check.options.filter(function(o){ return o.label === valueLabel; })[0];
-      if(!opt) return;
       var cable = ensureCable(realKey);
-      cable[check.key] = opt.value;
+      var cableBefore = JSON.stringify(cable);
+      if(looseText(valueLabel) === "out of scope"){
+        cable[check.key + "InScope"] = false;
+      } else {
+        var opt = check.options.filter(function(o){ return looseText(o.label) === looseText(valueLabel); })[0];
+        if(!opt) return;
+        cable[check.key] = opt.value;
+        if(cable[check.key + "InScope"] === false) cable[check.key + "InScope"] = true;
+      }
       if(col8) cable[check.key + "Notes"] = String(col8);
+      if(JSON.stringify(cable) !== cableBefore) changed++;
       if(!cableTouched[realKey]){ cableTouched[realKey] = true; cableApplied++; }
     });
 
     state.dirty = true;
     updateFileLabel();
+    cloudNotifyBulkItemsReplaced(); // save what was just loaded
     render();
-    return { applied: applied, cableApplied: cableApplied };
+    return { applied: applied, cableApplied: cableApplied, changed: changed, unmatched: unmatched, unreadStatus: unreadStatus };
   }
 
   function loadProgress(file){
@@ -3100,7 +3127,10 @@
       window.XlsxReader.readFile(file).then(function(sheets){
         var res = applyExcelProgress(sheets);
         if(res.error){ alert(res.error); return; }
-        alert("Loaded " + plural(res.applied, "item") + (res.cableApplied ? " and cable status for " + plural(res.cableApplied, "room") : "") + " from " + file.name + ".");
+        alert("Read " + plural(res.applied, "item") + (res.cableApplied ? " and cable status for " + plural(res.cableApplied, "room") : "") + " from " + file.name + ".\n" +
+          (res.changed ? plural(res.changed, "line") + " changed and saved." : "Nothing was different from what's already here, so nothing changed.") +
+          (res.unmatched ? "\n\n" + plural(res.unmatched, "row") + " in the file didn't match any item in this project (floor, room, Mfr / Model and Description all have to match) and " + (res.unmatched === 1 ? "was" : "were") + " skipped." : "") +
+          (res.unreadStatus ? "\n\n" + plural(res.unreadStatus, "Status cell") + " couldn't be understood and " + (res.unreadStatus === 1 ? "was" : "were") + " left as is. Use: Not started, In progress, Installed, or Out of scope." : ""));
       }).catch(function(e){ alert("Couldn't read that Excel file: " + (e && e.message ? e.message : e)); });
       return;
     }
