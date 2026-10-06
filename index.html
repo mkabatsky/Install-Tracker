@@ -2223,7 +2223,7 @@
     main.innerHTML =
       '<div class="item-desc">' + escapeHtml(check.label) + '</div>' +
       '<div class="item-sub"><button type="button" class="note-toggle' + (notes ? ' has-note' : '') + '" data-action="toggle-note">' + (notes ? "note" : "+ note") + '</button></div>' +
-      '<div class="note-box" data-role="note-box"><textarea placeholder="Add a note…" data-role="note-input">' + escapeHtml(notes) + '</textarea></div>';
+      '<div class="note-box' + (notes ? ' open' : '') + '" data-role="note-box"><textarea placeholder="Add a note…" data-role="note-input">' + escapeHtml(notes) + '</textarea></div>';
     el.appendChild(main);
 
     var controls = document.createElement("div");
@@ -2327,7 +2327,7 @@
       '<div class="item-mm">' + escapeHtml(mm || "(no manufacturer/model)") +
         (it.description ? ' <span class="item-desc">' + escapeHtml(it.description) + '</span>' : '') + '</div>' +
       '<div class="item-sub">' + subParts.join("") + '</div>' +
-      '<div class="note-box" data-role="note-box"><textarea placeholder="Add a note…" data-role="note-input">' + escapeHtml(it.notes) + '</textarea></div>';
+      '<div class="note-box' + (it.notes ? ' open' : '') + '" data-role="note-box"><textarea placeholder="Add a note…" data-role="note-input">' + escapeHtml(it.notes) + '</textarea></div>';
     el.appendChild(main);
 
     var controls = document.createElement("div");
