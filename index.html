@@ -1886,6 +1886,14 @@
     if(h) h.textContent = title;
     cloudNotifyProjectMetaChanged();
   }
+  // Name for a downloaded file: the project's name exactly as it's shown
+  // (only characters Windows won't allow in a file name are dropped), then
+  // the date and time of the download, e.g. "Biobloom-ALM26003 2026-10-06 1432.xlsx".
+  function downloadName(ext){
+    var name = String(state.projectName || "Install Tracker").replace(/[<>:"\/\\|?*\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "") || "Install Tracker";
+    var d = new Date(), p = function(n){ return String(n).padStart(2, "0"); };
+    return name + " " + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + p(d.getMinutes()) + "." + ext;
+  }
   function projectSlug(){
     return (state.projectName || "project").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project";
   }
@@ -2452,7 +2460,7 @@
 
   function exportCsv(){
     var csv = toCsv();
-    var filename = projectSlug() + "-install-tracker-" + new Date().toISOString().slice(0,10) + ".csv";
+    var filename = downloadName("csv");
     downloadFile(filename, csv, "text/csv");
   }
 
@@ -2594,7 +2602,7 @@
     try{
       var rowsXml = buildScheduleWorkbookRows();
       var bytes = window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW });
-      var filename = projectSlug() + "-install-tracker-" + new Date().toISOString().slice(0,10) + ".xlsx";
+      var filename = downloadName("xlsx");
       downloadFile(filename, bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     } catch(e){
       exportCsv();
@@ -2859,7 +2867,7 @@
     try{
       var pages = buildSchedulePdfPages();
       var bytes = window.PdfWriter.buildBytes(pages);
-      var filename = projectSlug() + "-install-tracker-" + new Date().toISOString().slice(0,10) + ".pdf";
+      var filename = downloadName("pdf");
       downloadFile(filename, bytes, "application/pdf");
     } catch(e){
       downloadPdf();
@@ -2884,7 +2892,7 @@
     var json = JSON.stringify(buildSavePayload()).replace(/</g, "\\u003c");
     var dataTag = '<script id="savedTracker" type="application/json">' + json + "<\/script>\n";
     var html = PAGE_TEMPLATE.replace(/<script>\s*\(function\(\)\{/, function(m){ return dataTag + m; });
-    var filename = projectSlug() + "-install-tracker-" + new Date().toISOString().slice(0,10) + ".html";
+    var filename = downloadName("html");
     downloadFile(filename, html, "text/html");
     state.dirty = false;
     updateFileLabel();
@@ -3520,7 +3528,8 @@
           imp.sheets.push(sh);
         });
       });
-      if(!imp.project && imp.files.length) imp.project = imp.files[0].replace(/\.[^.]+$/, "").trim();
+      // an open project keeps its own name; the file name is only a suggestion for a brand-new one
+      if(!imp.project) imp.project = state.projectName || (imp.files.length ? imp.files[0].replace(/\.[^.]+$/, "").trim() : "");
       imp.headings = {}; imp.summary = {};
       autoConfigure();
       imp.busy = false; renderBom();
@@ -3749,10 +3758,13 @@
       imp = null;
       return;
     }
+    // bomProjectName is the dialog's Project name box, which starts as the
+    // open project's own name - so loading a BOM never renames it by itself
     mergeDataset(items, bomProjectName);
     setDataSourceNote(bomNote);
     state.dirty = true;
     updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
     render();
     bomClose();
     imp = null;
