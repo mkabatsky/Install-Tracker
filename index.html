@@ -549,6 +549,8 @@
 
   .it-cloud-bar{display:none;align-items:center;gap:8px;font-size:12.5px;color:var(--text-muted);flex-wrap:wrap;}
   .it-cloud-bar button.tool-btn{padding:5px 11px;font-size:12.5px;}
+  /* Dashboard and Projects: the two ways to move around, so larger and in the main colour */
+  .it-cloud-bar button.tool-btn.it-nav-btn{padding:8px 18px;font-size:14px;font-weight:600;}
   #itSyncDot{width:7px;height:7px;border-radius:50%;background:var(--good);flex:none;display:inline-block;}
   #itSyncDot.busy{background:var(--gold);animation:it-pulse 1s ease-in-out infinite;}
   #itSyncDot.bad{background:var(--danger);}
@@ -809,12 +811,12 @@
         <span class="it-cloud-user" id="itCloudUser"></span>
         <button class="tool-btn" id="itSubmitReportBtn" type="button" title="Send the status-update email now instead of waiting">Submit</button>
         <button class="tool-btn" id="itJobInfoBtn" type="button">Job info</button>
+        <button class="tool-btn tool-btn-primary it-nav-btn" id="itDashboardBtn" type="button">Dashboard</button>
+        <button class="tool-btn tool-btn-primary it-nav-btn" id="itProjectsBtn" type="button">Projects</button>
         <span class="it-backup-note" id="itJobInfoNote" title=""></span>
         <span class="it-backup-note" id="itBackupFolderNote" title=""></span>
         <button class="tool-btn" id="itBackupFolderBtn" type="button">Backup folder</button>
-        <button class="tool-btn" id="itDashboardBtn" type="button">Dashboard</button>
         <button class="tool-btn" id="itManageUsersBtn" type="button">Manage users</button>
-        <button class="tool-btn" id="itProjectsBtn" type="button">Projects</button>
         <button class="tool-btn" id="itSignOutBtn" type="button">Sign out</button>
       </div>
       <div class="overall">
@@ -849,7 +851,7 @@
         <button class="chip" data-filter="out_of_scope" aria-pressed="false">Out of scope</button>
       </div>
       <button class="tool-btn" id="expandAllBtn">Expand all</button>
-      <button class="tool-btn tool-btn-primary" id="bomBtn">
+      <button class="tool-btn" id="bomBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
         Load BOM
       </button>
