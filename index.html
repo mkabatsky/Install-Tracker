@@ -739,29 +739,31 @@
      grid wraps itself down to 2, then 1, on a narrower window - no media
      query needed, auto-fill + minmax does that on its own. */
   .it-dashboard-panel{max-width:1280px;}
-  .it-dash-list{max-height:calc(100vh - 230px);overflow:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;align-content:start;}
+  /* never scrolls sideways: the columns share the width, and a card can't be
+     pushed wider than its column by what's inside it (min-width:0 + clipping) */
+  .it-dash-list{max-height:calc(100vh - 230px);overflow-x:hidden;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));grid-auto-rows:max-content;gap:10px;align-content:start;}
   .it-dash-card{
-    border:1px solid var(--border);border-radius:var(--radius);padding:7px 9px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--radius);padding:9px 11px;background:var(--surface);
     cursor:pointer;text-align:left;font:inherit;color:inherit;
+    min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:7px;
   }
   .it-dash-card:hover{border-color:var(--navy);box-shadow:var(--shadow);}
   .it-dash-name{
-    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:13.5px;margin-bottom:4px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;font-size:13.5px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
   }
-  /* compact card: the same numbers, packed tighter so more projects fit on one screen */
-  .it-dash-card .pct{font-size:20px;line-height:1;}
-  .it-dash-card .pct-label{font-size:9px;}
-  .it-dash-card .overall{gap:8px;}
-  .it-dash-card .overall-bar .track{height:6px;}
-  .it-dash-card .counts{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin-top:3px;font-size:10.5px;}
-  .it-dash-card .counts span{white-space:nowrap;}
-  /* reuses the exact same .overall/.pct/.overall-bar family the live
-     per-project header already uses, so a project's card here looks
-     identical to its own dashboard once opened - just without the
-     surrounding card chrome (this already has its own) and a wider bar. */
-  .it-dash-card .overall{border:none;box-shadow:none;padding:0;background:transparent;pointer-events:none;}
-  .it-dash-card .overall-bar{width:100%;}
+  /* card layout: % and bar on one line, then two rows of three equal
+     columns (items, then cable) - number on top, label under it - so every
+     card lines up with its neighbours and nothing can run past the edge */
+  .itd-top{display:flex;align-items:center;gap:9px;}
+  .itd-pct{font-family:"IBM Plex Mono",monospace;font-size:20px;font-weight:600;line-height:1;color:var(--navy);flex:none;min-width:3.4ch;}
+  .itd-track{flex:1;min-width:0;height:7px;border-radius:5px;background:var(--idle-bg);overflow:hidden;}
+  .itd-fill{height:100%;border-radius:5px;background:linear-gradient(90deg, var(--good-strong), var(--good));}
+  .itd-row{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px;}
+  .itd-row + .itd-row{border-top:1px solid var(--border-soft);padding-top:6px;}
+  .itd-stat{min-width:0;}
+  .itd-stat b{display:block;font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .itd-stat span{display:block;font-size:9.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .it-dash-sort{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;color:var(--text-muted);}
   .it-dash-sort select{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
   .it-dash-sort input[type="search"]{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);margin-left:auto;width:220px;max-width:100%;}
@@ -773,7 +775,7 @@
 
   /* full screen for monitoring: the panel fills the screen and the card grid takes the height */
   .it-dashboard-panel:fullscreen,
-  .it-dash-expanded .it-dashboard-panel{max-width:none;width:100vw;height:100vh;max-height:100vh;border-radius:0;overflow:auto;}
+  .it-dash-expanded .it-dashboard-panel{max-width:none;width:100vw;height:100vh;max-height:100vh;border-radius:0;box-sizing:border-box;overflow-x:hidden;overflow-y:auto;}
   .it-dashboard-panel:fullscreen .it-dash-list,
   .it-dash-expanded .it-dashboard-panel .it-dash-list{max-height:calc(100vh - 170px);}
 
@@ -5697,6 +5699,9 @@
     else sorted.sort(function(a, b){ return (a.stats.pct - b.stats.pct) || byName(a, b); });
     return sorted;
   }
+  function itdStat(value, label){
+    return '<div class="itd-stat"><b>' + escapeHtml(String(value)) + '</b><span>' + label + '</span></div>';
+  }
   function itDashPaint(){
     var list = itEl("itDashList");
     var sel = itEl("itDashSort");
@@ -5712,17 +5717,12 @@
       var name = pMeta.projectName || p.name || "Untitled project";
       return '<button type="button" class="it-dash-card" data-itd-open="' + p.id + '" title="' + escapeHtml(name) + ' - click to open">' +
         '<div class="it-dash-name">' + escapeHtml(name) + '</div>' +
-        '<div class="overall">' +
-          '<div><div class="pct mono">' + s.pct + '%</div><div class="pct-label">installed</div></div>' +
-          '<div class="overall-bar"><div class="track"><div class="fill" style="width:' + s.pct + '%"></div></div>' +
-          '<div class="counts">' +
-            '<span><b>' + s.installed + '</b> installed</span>' +
-            '<span><b>' + s.inProgress + '</b> in progress</span>' +
-            '<span><b>' + s.notStarted + '</b> not started</span>' +
-            '<span class="cable-count"><b>' + s.cablePulled + ' / ' + s.cableTotalRooms + '</b> rooms cable pulled</span>' +
-            '<span class="cable-count"><b>' + s.cableTerminated + ' / ' + s.cableTotalRooms + '</b> rooms cable terminated</span>' +
-            '<span class="cable-count"><b>' + s.cableTested + ' / ' + s.cableTotalRooms + '</b> rooms cable tested</span>' +
-          '</div>' +
+        '<div class="itd-top"><div class="itd-pct">' + s.pct + '%</div><div class="itd-track"><div class="itd-fill" style="width:' + s.pct + '%"></div></div></div>' +
+        '<div class="itd-row">' +
+          itdStat(s.installed, "Installed") + itdStat(s.inProgress, "In progress") + itdStat(s.notStarted, "Not started") +
+        '</div>' +
+        '<div class="itd-row" title="Rooms with cable pulled / terminated / tested, out of ' + s.cableTotalRooms + ' rooms">' +
+          itdStat(s.cablePulled + "/" + s.cableTotalRooms, "Cable pulled") + itdStat(s.cableTerminated + "/" + s.cableTotalRooms, "Terminated") + itdStat(s.cableTested + "/" + s.cableTotalRooms, "Tested") +
         '</div>' +
       '</button>';
     }).join("");
