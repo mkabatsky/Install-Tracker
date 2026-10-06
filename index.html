@@ -5548,6 +5548,19 @@
         headers: token ? {Authorization: "Bearer " + token} : undefined,
         body: body
       });
+    }).then(function(res){
+      // A function that refuses a request answers with its own reason, but the
+      // library only reports "returned a non-2xx status code" - dig the real
+      // reason out of the answer so the message on screen says what's wrong.
+      var ctx = res && res.error && res.error.context;
+      if (!ctx || typeof ctx.json !== "function") return res;
+      return ctx.json().then(function(b){
+        if (b && b.error){
+          res.error.message = String(b.error) +
+            (/it_profiles_role_check/.test(String(b.error)) ? " — the Dashboard role hasn't been turned on in the database yet: run supabase-setup-dashboard-role.sql in Supabase once, then save again." : "");
+        }
+        return res;
+      }).catch(function(){ return res; });
     });
   }
 
