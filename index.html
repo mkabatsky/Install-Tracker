@@ -5627,6 +5627,21 @@
 
   // One query per table across EVERY active project, aggregated
   // client-side, rather than one query per project.
+  // The database hands back at most 1000 rows per request, and the dashboard
+  // reads every project's items at once - so it has to ask page by page.
+  // (Reading only the first 1000 left projects short of items and rooms.)
+  // build() must return a fresh query with a fixed order each time.
+  function itDashFetchAll(build){
+    var all = [], PAGE = 1000;
+    function next(from){
+      return build().range(from, from + PAGE - 1).then(function(r){
+        if (r.error) throw r.error;
+        all = all.concat(r.data || []);
+        return (r.data && r.data.length === PAGE) ? next(from + PAGE) : {data: all};
+      });
+    }
+    return next(0);
+  }
   function itLoadDashboard(){
     var list = itEl("itDashList");
     // on the auto-refresh the cards already on screen stay put until the new numbers arrive
@@ -5634,8 +5649,8 @@
     itDashMsg("");
     return Promise.all([
       itc.sb.from("it_projects").select("id,name,meta").eq("deleted", false).eq("archived", false),
-      itc.sb.from("it_items").select("project_id,data").eq("deleted", false),
-      itc.sb.from("it_cable").select("project_id,room_key,data").eq("deleted", false)
+      itDashFetchAll(function(){ return itc.sb.from("it_items").select("project_id,data").eq("deleted", false).order("project_id", {ascending: true}).order("id", {ascending: true}); }),
+      itDashFetchAll(function(){ return itc.sb.from("it_cable").select("project_id,room_key,data").eq("deleted", false).order("project_id", {ascending: true}).order("room_key", {ascending: true}); })
     ]).then(function(results){
       var projectsRes = results[0], itemsRes = results[1], cableRes = results[2];
       if (projectsRes.error){ itDashMsg("Couldn't load: " + projectsRes.error.message, "bad"); list.textContent = ""; return; }
