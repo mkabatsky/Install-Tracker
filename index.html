@@ -268,6 +268,7 @@
   .item-main{ min-width:0; grid-column:2; }
   .item-desc{ font-size:13.5px; font-weight:500; line-height:1.35; }
   .item-mm{ font-size:13.5px; font-weight:600; line-height:1.35; color:var(--text); }
+  .item-desc{ font-weight:400; color:var(--text); margin-left:6px; }
   .item-spec{ margin-top:3px; font-size:11.5px; font-family:"IBM Plex Mono", ui-monospace, monospace; color:var(--text-muted); line-height:1.4; }
   .item-sub{ margin-top:6px; font-size:12px; color:var(--text-muted); display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .qty-badge{
@@ -1060,6 +1061,7 @@
     </div>
     <div class="bom-foot">
       <span class="mono" id="addHint"></span>
+      <button type="button" class="tool-btn" id="addItemDelete" hidden>Remove item</button>
       <button type="button" class="tool-btn" id="addItemCancel">Cancel</button>
       <button type="button" class="tool-btn tool-btn-primary" id="addItemSave">Add</button>
     </div>
@@ -1782,6 +1784,7 @@
     return null;
   }
   function cableOptionLabel(checkKey, value){
+    if(value === "out_of_scope") return "Out of scope";
     var check = cableCheckByKey(checkKey);
     if(!check) return value;
     for(var i=0;i<check.options.length;i++){ if(check.options[i].value === value) return check.options[i].label; }
@@ -1959,13 +1962,24 @@
   // items above; these apply the same filter to a room's Cable Pulled/Terminated/Tested rows so
   // e.g. selecting "Installed" also surfaces cable checks that are done, and "In progress" surfaces
   // cable checks currently in progress — instead of always showing all three regardless of filter.
+  // A cable check counts toward progress and totals only when it applies to
+  // the room: not marked N/A, and not taken out of scope. Works on any
+  // cable record (this project's, or another project's on the dashboard).
+  function cableCheckApplies(cable, checkKey){
+    return !!cable && cable[checkKey] !== "na" && cable[checkKey + "InScope"] !== false;
+  }
+  // what exports show for a check: its value, or "out_of_scope"
+  function cableShownValue(cable, checkKey){
+    return cable && cable[checkKey + "InScope"] === false ? "out_of_scope" : cable[checkKey];
+  }
   function isCableDone(checkKey, value){
     return value === CABLE_DONE_VALUES[checkKey] || value === "na";
   }
 
-  function cableRowMatchesFilter(checkKey, value, filter){
+  function cableRowMatchesFilter(checkKey, value, filter, inScope){
     if(filter === "all") return true;
-    if(filter === "out_of_scope") return false; // cable checks have no in/out-of-scope concept
+    if(filter === "out_of_scope") return inScope === false;
+    if(inScope === false) return false; // out of scope: not remaining, in progress or installed
     if(filter === "remaining") return !isCableDone(checkKey, value);
     if(filter === "installed") return isCableDone(checkKey, value);
     if(filter === "in_progress") return value === "in_progress";
@@ -1982,7 +1996,7 @@
     if(q && !matchesSearchRoom(r, q)) return [];
     var cable = ensureCable(r.key);
     return CABLE_CHECKS.filter(function(check){
-      return cableRowMatchesFilter(check.key, cable[check.key], filter);
+      return cableRowMatchesFilter(check.key, cable[check.key], filter, cable[check.key + "InScope"] !== false);
     });
   }
 
@@ -1994,18 +2008,22 @@
 
   // Cable Pulled contributes 15% of a room's (and the rolled-up floor/overall)
   // progress percentage; equipment install status contributes the other 85%.
-  // "Installed" or "N/A" (nothing to pull) count as fully satisfied; "In
-  // progress" counts as half credit; anything else counts as zero.
+  // "Installed" counts as fully satisfied; "In progress" as half credit;
+  // anything else as zero. A room where Cable Pulled is N/A or out of scope
+  // is left out of the cable share altogether (it neither helps nor hurts),
+  // and when that's every room the percentage is equipment only.
   var CABLE_PULLED_WEIGHT = 0.15;
 
+  // null = cable pulling doesn't apply to this room
   function cablePulledPct(roomKey){
     var cable = state.cable[roomKey];
     if(!cable) return 0;
+    if(!cableCheckApplies(cable, "pulled")) return null;
     // Terminated or tested (passed) can only happen to a cable that was
     // already pulled, so either of those also counts as pulling being
     // done - even if "Cable Pulled?" itself was never explicitly set to
     // Installed (e.g. someone jumped straight to marking it terminated).
-    if(cable.pulled === "installed" || cable.pulled === "na" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
+    if(cable.pulled === "installed" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
     if(cable.pulled === "in_progress") return 50;
     return 0;
   }
@@ -2022,13 +2040,15 @@
     if(rooms && rooms.length){
       var weightedSum = 0, totalWeight = 0;
       rooms.forEach(function(r){
+        var roomCablePct = cablePulledPct(r.key);
+        if(roomCablePct === null) return;
         var w = r.items.filter(function(it){ return it.inScope; }).length;
         if(!w) w = r.items.length || 1;
-        weightedSum += cablePulledPct(r.key) * w;
+        weightedSum += roomCablePct * w;
         totalWeight += w;
       });
-      cablePct = totalWeight ? (weightedSum / totalWeight) : 0;
-      pct = Math.round(equipPct * (1 - CABLE_PULLED_WEIGHT) + cablePct * CABLE_PULLED_WEIGHT);
+      cablePct = totalWeight ? (weightedSum / totalWeight) : null;
+      pct = cablePct === null ? Math.round(equipPct) : Math.round(equipPct * (1 - CABLE_PULLED_WEIGHT) + cablePct * CABLE_PULLED_WEIGHT);
     } else {
       pct = Math.round(equipPct);
     }
@@ -2049,9 +2069,9 @@
     document.getElementById("cProgress").textContent = overall.inProgress;
     document.getElementById("cNotStarted").textContent = overall.notStarted;
     var cableTotals = computeCableTotals();
-    document.getElementById("cCablePulled").textContent = cableTotals.pulled + " / " + cableTotals.totalRooms;
-    document.getElementById("cCableTerminated").textContent = cableTotals.terminated + " / " + cableTotals.totalRooms;
-    document.getElementById("cCableTested").textContent = cableTotals.tested + " / " + cableTotals.totalRooms;
+    document.getElementById("cCablePulled").textContent = cableTotals.pulled + " / " + cableTotals.pulledOf;
+    document.getElementById("cCableTerminated").textContent = cableTotals.terminated + " / " + cableTotals.terminatedOf;
+    document.getElementById("cCableTested").textContent = cableTotals.tested + " / " + cableTotals.testedOf;
 
     var totalRooms = 0;
     floors.forEach(function(f){ totalRooms += f.rooms.length; });
@@ -2185,8 +2205,9 @@
     var notesKey = check.key + "Notes";
     var notes = cable[notesKey] || "";
 
+    var inScope = cable[check.key + "InScope"] !== false;
     var el = document.createElement("div");
-    el.className = "item cable-item";
+    el.className = "item cable-item" + (inScope ? "" : " out-of-scope");
     el.dataset.roomKey = r.key;
     el.dataset.checkKey = check.key;
 
@@ -2205,19 +2226,34 @@
 
     var controls = document.createElement("div");
     controls.className = "item-controls";
+    var scopeLabel = document.createElement("label");
+    scopeLabel.className = "scope-toggle";
+    scopeLabel.innerHTML = '<input type="checkbox" data-role="scope-check" ' + (inScope ? "checked" : "") + '> in scope';
+    controls.appendChild(scopeLabel);
     var seg = document.createElement("div");
     seg.className = "status-seg" + (check.options.length > 4 ? " status-seg-wide" : "");
-    check.options.forEach(function(opt){
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = cableValueClass(opt.value);
-      b.textContent = opt.label;
-      b.setAttribute("aria-pressed", value === opt.value ? "true" : "false");
-      b.dataset.value = opt.value;
-      seg.appendChild(b);
-    });
-    controls.appendChild(seg);
+    if(inScope){
+      check.options.forEach(function(opt){
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = cableValueClass(opt.value);
+        b.textContent = opt.label;
+        b.setAttribute("aria-pressed", value === opt.value ? "true" : "false");
+        b.dataset.value = opt.value;
+        seg.appendChild(b);
+      });
+      controls.appendChild(seg);
+    } else {
+      var oos = document.createElement("span");
+      oos.className = "oos-label";
+      oos.textContent = "Out of scope";
+      controls.appendChild(oos);
+    }
     el.appendChild(controls);
+    scopeLabel.querySelector("input").addEventListener("change", function(ev){
+      ensureCable(r.key)[check.key + "InScope"] = ev.target.checked;
+      updateCable(r.key, check.key, null, null);
+    });
 
     el.querySelector('[data-action="toggle-note"]').addEventListener("click", function(){
       var box = el.querySelector('[data-role="note-box"]');
@@ -2256,13 +2292,15 @@
   function computeCableTotals(){
     var keys = Object.keys(state.cable);
     var pulled = 0, terminated = 0, tested = 0;
+    var pulledOf = 0, terminatedOf = 0, testedOf = 0;
     keys.forEach(function(k){
       var c = state.cable[k];
-      if(c.pulled === "installed") pulled++;
-      if(c.terminated === "terminated") terminated++;
-      if(c.tested === "pass") tested++;
+      if(cableCheckApplies(c, "pulled")){ pulledOf++; if(c.pulled === "installed") pulled++; }
+      if(cableCheckApplies(c, "terminated")){ terminatedOf++; if(c.terminated === "terminated") terminated++; }
+      if(cableCheckApplies(c, "tested")){ testedOf++; if(c.tested === "pass") tested++; }
     });
-    return { totalRooms: keys.length, pulled: pulled, terminated: terminated, tested: tested };
+    // pulledOf/terminatedOf/testedOf = rooms each check applies to (N/A and out of scope left out)
+    return { totalRooms: keys.length, pulled: pulled, terminated: terminated, tested: tested, pulledOf: pulledOf, terminatedOf: terminatedOf, testedOf: testedOf };
   }
 
   function renderItem(it){
@@ -2281,9 +2319,11 @@
     var subParts = [];
     subParts.push('<span class="qty-badge">QTY ' + escapeHtml(it.qty != null ? it.qty : 1) + '</span>');
     subParts.push('<button type="button" class="note-toggle' + (it.notes ? ' has-note' : '') + '" data-action="toggle-note">' + (it.notes ? "note" : "+ note") + '</button>');
+    subParts.push('<button type="button" class="note-toggle" data-action="edit-item" title="Change this item\'s make, model, description or quantity, or remove it">edit</button>');
     main.innerHTML =
-      '<div class="item-mm">' + escapeHtml(mm || "(no manufacturer/model)") + '</div>' +
-      '<div class="item-spec">' + escapeHtml(it.description || "(no description)") + '</div>' +
+      // make/model and description on one line, both in black
+      '<div class="item-mm">' + escapeHtml(mm || "(no manufacturer/model)") +
+        (it.description ? ' <span class="item-desc">' + escapeHtml(it.description) + '</span>' : '') + '</div>' +
       '<div class="item-sub">' + subParts.join("") + '</div>' +
       '<div class="note-box" data-role="note-box"><textarea placeholder="Add a note…" data-role="note-input">' + escapeHtml(it.notes) + '</textarea></div>';
     el.appendChild(main);
@@ -2329,6 +2369,7 @@
       var val = noteInput.value;
       noteTimer = setTimeout(function(){ updateItem(it.id, { notes: val }); }, 500);
     });
+    el.querySelector('[data-action="edit-item"]').addEventListener("click", function(){ openAddItem(it.id); });
 
     el.querySelector('[data-role="scope-check"]').addEventListener("change", function(ev){
       updateItem(it.id, { inScope: ev.target.checked });
@@ -2411,7 +2452,7 @@
           rows.push([
             f.floor, r.roomNumber, r.roomType, r.items.length + i + 1, "", "", "", check.label,
             "",
-            cableOptionLabel(check.key, cable[check.key]),
+            cableOptionLabel(check.key, cableShownValue(cable, check.key)),
             cable[check.key + "Notes"] || ""
           ]);
         });
@@ -2479,7 +2520,7 @@
     if(value === "pass" || value === "installed" || value === "terminated") return "green";
     if(value === "in_progress") return "gold";
     if(value === "fail") return "red";
-    if(value === "na") return "na";
+    if(value === "na" || value === "out_of_scope") return "na";
     return "gray";
   }
 
@@ -2517,9 +2558,9 @@
     rowsXml.push(XW.xlsxRow(5, row5, 22));
 
     var row6 = [XW.xlsxCell(0, 6, "INSTALLED", "pctLabel", false)].concat(blank(1, 2, 6, "pctLabel"), [
-      XW.xlsxCell(3, 6, c.pulled + " / " + c.totalRooms + " rooms cable pulled", "statCable", false), XW.xlsxCell(4, 6, "", "statCable", false),
-      XW.xlsxCell(5, 6, c.terminated + " / " + c.totalRooms + " rooms cable terminated", "statCable", false),
-      XW.xlsxCell(6, 6, c.tested + " / " + c.totalRooms + " rooms cable tested", "statCable", false), XW.xlsxCell(7, 6, "", "statCable", false), XW.xlsxCell(8, 6, "", "statCable", false)
+      XW.xlsxCell(3, 6, c.pulled + " / " + c.pulledOf + " rooms cable pulled", "statCable", false), XW.xlsxCell(4, 6, "", "statCable", false),
+      XW.xlsxCell(5, 6, c.terminated + " / " + c.terminatedOf + " rooms cable terminated", "statCable", false),
+      XW.xlsxCell(6, 6, c.tested + " / " + c.testedOf + " rooms cable tested", "statCable", false), XW.xlsxCell(7, 6, "", "statCable", false), XW.xlsxCell(8, 6, "", "statCable", false)
     ]);
     rowsXml.push(XW.xlsxRow(6, row6, 22));
     rowsXml.push(XW.xlsxRow(7, [], 8));
@@ -2575,7 +2616,7 @@
 
         var cable = ensureCable(r.key);
         CABLE_CHECKS.forEach(function(check, i){
-          var val = cable[check.key];
+          var val = cableShownValue(cable, check.key);
           var cells = [
             XW.xlsxCell(0, rowNum, "", "default", false),
             XW.xlsxCell(1, rowNum, "", "default", false),
@@ -2621,7 +2662,7 @@
     if(value === "pass" || value === "installed" || value === "terminated") return "installed";
     if(value === "in_progress") return "in_progress";
     if(value === "fail") return "fail";
-    if(value === "na") return "na";
+    if(value === "na" || value === "out_of_scope") return "na";
     return "not_started";
   }
 
@@ -2643,9 +2684,9 @@
         '<span class="pr-chip in_progress">' + overall.inProgress + ' in progress</span>' +
         '<span class="pr-chip not_started">' + overall.notStarted + ' not started</span>' +
         (overall.outOfScope ? ('<span class="pr-chip oos">' + overall.outOfScope + ' out of scope</span>') : '') +
-        (function(c){ return '<span class="pr-chip not_started">' + c.pulled + ' / ' + c.totalRooms + ' rooms cable pulled</span>' +
-          '<span class="pr-chip not_started">' + c.terminated + ' / ' + c.totalRooms + ' rooms cable terminated</span>' +
-          '<span class="pr-chip not_started">' + c.tested + ' / ' + c.totalRooms + ' rooms cable tested</span>'; })(computeCableTotals()) +
+        (function(c){ return '<span class="pr-chip not_started">' + c.pulled + ' / ' + c.pulledOf + ' rooms cable pulled</span>' +
+          '<span class="pr-chip not_started">' + c.terminated + ' / ' + c.terminatedOf + ' rooms cable terminated</span>' +
+          '<span class="pr-chip not_started">' + c.tested + ' / ' + c.testedOf + ' rooms cable tested</span>'; })(computeCableTotals()) +
       '</div>';
 
     floors.forEach(function(f){
@@ -2675,7 +2716,7 @@
         var cable = ensureCable(r.key);
         html += '<tr class="pr-cable-label"><td colspan="6">Cable status</td></tr>';
         CABLE_CHECKS.forEach(function(check, i){
-          var val = cable[check.key];
+          var val = cableShownValue(cable, check.key);
           html += '<tr>' +
             '<td>' + (r.items.length + i + 1) + '</td>' +
             '<td></td>' +
@@ -2762,10 +2803,9 @@
     var colW = bw / 4;
     row1.forEach(function(r, i){ stat(bx + i * colW, top - 37, r[0], r[1], r[2]); });
     // Row 2: cable checks by room
-    var n = cable.totalRooms;
     var cw3 = bw / 3;
-    [[cable.pulled, "rooms cable pulled"], [cable.terminated, "rooms cable terminated"], [cable.tested, "rooms cable tested"]].forEach(function(r, i){
-      stat(bx + i * cw3, top - 57, null, r[0] + " / " + n, r[1]);
+    [[cable.pulled, "rooms cable pulled", cable.pulledOf], [cable.terminated, "rooms cable terminated", cable.terminatedOf], [cable.tested, "rooms cable tested", cable.testedOf]].forEach(function(r, i){
+      stat(bx + i * cw3, top - 57, null, r[0] + " / " + r[2], r[1]);
     });
 
     doc.y = top - h - 10;
@@ -2848,7 +2888,7 @@
         var cable = ensureCable(r.key);
         CABLE_CHECKS.forEach(function(check, i){
           doc.ensureSpace(rowH, drawColHeader);
-          var val = cable[check.key];
+          var val = cableShownValue(cable, check.key);
           var cs = pdfCableStyle(check.key, val);
           doc.rect(colX[4], doc.y - rowH + 2, COLS[4].w-4, 10, cs.bg);
           doc.text(colX[0]+3, doc.y - 9, String(r.items.length + i + 1), 7.5, false, PDF_COLORS.text);
@@ -2932,6 +2972,7 @@
           if(typeof p[check.key] === "string" && valid.indexOf(p[check.key]) > -1) cur[check.key] = p[check.key];
           var nKey = check.key + "Notes";
           if(typeof p[nKey] === "string") cur[nKey] = p[nKey];
+          if(typeof p[check.key + "InScope"] === "boolean") cur[check.key + "InScope"] = p[check.key + "InScope"];
         });
         cableApplied++;
       });
@@ -3782,14 +3823,33 @@
     return out;
   }
   function addItemSetError(msg){ document.getElementById("addErr").textContent = msg || ""; }
+  var addEditId = null; // the item being edited, or null when adding a new one
   function addItemSyncRoomFields(){
-    var isNew = document.getElementById("addRoomSel").value === "__new";
+    var isNew = !addEditId && document.getElementById("addRoomSel").value === "__new";
     document.getElementById("addNewRoom").style.display = isNew ? "" : "none";
-    document.getElementById("addHint").textContent = isNew ? "New room + first line item" : "New line item in this room";
+    document.getElementById("addHint").textContent = addEditId ? "" : isNew ? "New room + first line item" : "New line item in this room";
   }
-  function openAddItem(){
+  // editId = an existing item to change (make, model, description, qty) or
+  // remove; left out = add a new room / item, as before
+  function openAddItem(editId){
     if(!cloudEditAllowed()){
-      alert("Open a project first. Viewers can't add rooms or items.");
+      alert("Open a project first. Viewers can't add or change rooms or items.");
+      return;
+    }
+    var editing = typeof editId === "string" && state.items[editId] ? state.items[editId] : null;
+    addEditId = editing ? editId : null;
+    document.getElementById("addItemTitle").textContent = editing ? "Edit item" : "Add room / item";
+    document.getElementById("addItemSave").textContent = editing ? "Save" : "Add";
+    document.getElementById("addItemDelete").hidden = !editing;
+    document.getElementById("addRoomSel").parentElement.style.display = editing ? "none" : "";
+    if(editing){
+      document.getElementById("addMfr").value = editing.mfr || "";
+      document.getElementById("addModel").value = editing.model || "";
+      document.getElementById("addDesc").value = editing.description || "";
+      document.getElementById("addQty").value = editing.qty != null ? editing.qty : 1;
+      addItemSetError("");
+      addItemSyncRoomFields();
+      document.getElementById("addItemDialog").showModal();
       return;
     }
     var sel = document.getElementById("addRoomSel");
@@ -3813,6 +3873,13 @@
     var qty = parseInt(val("addQty"), 10);
     if(!(qty >= 1)){ addItemSetError("Qty must be 1 or more."); return; }
     if(!model && !desc){ addItemSetError("Enter a model or a description."); return; }
+    if(addEditId){
+      // status, notes and room stay as they are - only what the item IS changes
+      if(!state.items[addEditId]){ addItemSetError("That item is no longer in the schedule."); return; }
+      updateItem(addEditId, { mfr: mfr, model: model, description: desc, qty: qty });
+      addItemClose();
+      return;
+    }
 
     var floor, roomNumber, roomType, roomKey, roomIndexOnFloor;
     if(sel === "__new"){
@@ -3851,8 +3918,30 @@
     render();
     addItemClose();
   }
+  function removeEditedItem(){
+    var it = addEditId && state.items[addEditId];
+    if(!it) return;
+    var label = [it.mfr, it.model].filter(Boolean).join(" ") || it.description || "this item";
+    if(!confirm('Remove "' + label + '" from room ' + it.roomNumber + '? Its status and note go with it.')) return;
+    delete state.items[addEditId];
+    state.order = state.order.filter(function(id){ return id !== addEditId; });
+    // close the gap in the room's item numbers (1, 2, 3...)
+    var n = 0;
+    state.order.forEach(function(id){
+      var o = state.items[id];
+      if(!o || o.roomKey !== it.roomKey) return;
+      n++;
+      if(o.itemIndexInRoom !== n) updateItem(id, { itemIndexInRoom: n }, true);
+    });
+    state.dirty = true;
+    updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
+    render();
+    addItemClose();
+  }
   function setupAddItem(){
-    document.getElementById("addItemBtn").addEventListener("click", openAddItem);
+    document.getElementById("addItemDelete").addEventListener("click", removeEditedItem);
+    document.getElementById("addItemBtn").addEventListener("click", function(){ openAddItem(); });
     document.getElementById("addItemClose").addEventListener("click", addItemClose);
     document.getElementById("addItemCancel").addEventListener("click", addItemClose);
     document.getElementById("addItemSave").addEventListener("click", saveAddItem);
@@ -4136,7 +4225,11 @@
         try{ if (s.json) json = itItemJson(JSON.parse(s.json)); }catch(err){}
         return [e[0], {json: json, pos: s.pos, ts: s.ts}];
       }));
-      itc.syncedCable = new Map(c.syncedCable || []);
+      itc.syncedCable = new Map((c.syncedCable || []).map(function(e){
+        var sc = e[1] || {}, cj = "";
+        try{ if (sc.json) cj = itCableJson(JSON.parse(sc.json)); }catch(err){}
+        return [e[0], {json: cj, ts: sc.ts}];
+      }));
       return c;
     }catch(e){ return null; }
   }
@@ -4203,7 +4296,7 @@
     var base = itc.syncedCable.get(roomKey);
     if (base && base.ts && rts && rts < base.ts) return false;
     var rnorm = Object.assign({pulled: "not_installed", terminated: "not_installed", tested: "not_installed", pulledNotes: "", terminatedNotes: "", testedNotes: ""}, rdata);
-    var rjson = JSON.stringify(rnorm);
+    var rjson = itCableJson(rnorm);
     var local = state.cable[roomKey];
     if (!local){
       state.cable[roomKey] = rnorm;
@@ -4218,7 +4311,7 @@
       remote[k] = rnorm[k];
       merged[k] = JSON.stringify(local[k]) !== JSON.stringify(baseObj[k]) ? local[k] : rnorm[k];
     });
-    var changed = JSON.stringify(merged) !== JSON.stringify(local);
+    var changed = itCableJson(merged) !== itCableJson(local);
     state.cable[roomKey] = merged;
     // base = what the server has, not the merged result (see itMergeRemoteItem)
     itc.syncedCable.set(roomKey, {json: JSON.stringify(remote), ts: rts});
@@ -4237,7 +4330,13 @@
     ITEM_ALL_FIELDS.forEach(function(k){ out[k] = d[k]; });
     return JSON.stringify(out);
   }
-  var CABLE_FIELDS = ["pulled", "terminated", "tested", "pulledNotes", "terminatedNotes", "testedNotes"];
+  var CABLE_FIELDS = ["pulled", "terminated", "tested", "pulledNotes", "terminatedNotes", "testedNotes", "pulledInScope", "terminatedInScope", "testedInScope"];
+  // same idea as itItemJson, for a room's cable record
+  function itCableJson(d){
+    var out = {};
+    CABLE_FIELDS.forEach(function(k){ out[k] = d[k]; });
+    return JSON.stringify(out);
+  }
 
   function itMergeRemoteMeta(remoteMeta){
     var rm = remoteMeta || {};
@@ -4410,7 +4509,7 @@
     var cableUpserts = [], sentCable = new Map();
     Object.keys(state.cable).forEach(function(roomKey){
       var d = state.cable[roomKey];
-      var json = JSON.stringify(d);
+      var json = itCableJson(d);
       var s = itc.syncedCable.get(roomKey);
       if (!s || s.json !== json){
         cableUpserts.push({project_id: projectId, room_key: roomKey, data: d, deleted: false, updated_by: itc.clientId});
@@ -5584,7 +5683,8 @@
   // once without disturbing whatever's actually open.
   function itdCablePct(cable){
     if (!cable) return 0;
-    if (cable.pulled === "installed" || cable.pulled === "na" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
+    if (!cableCheckApplies(cable, "pulled")) return null; // doesn't apply to this room
+    if (cable.pulled === "installed" || cable.terminated === "terminated" || cable.tested === "pass") return 100;
     if (cable.pulled === "in_progress") return 50;
     return 0;
   }
@@ -5607,29 +5707,32 @@
       var weightedSum = 0, totalWeight = 0;
       roomKeys.forEach(function(k){
         var roomItems = roomMap[k];
+        var roomCablePct = itdCablePct(cableByRoomKey[k]);
+        if (roomCablePct === null) return;
         var w = roomItems.filter(function(it){ return it.inScope; }).length;
         if (!w) w = roomItems.length || 1;
-        weightedSum += itdCablePct(cableByRoomKey[k]) * w;
+        weightedSum += roomCablePct * w;
         totalWeight += w;
       });
-      var cablePct = totalWeight ? (weightedSum / totalWeight) : 0;
-      pct = Math.round(equipPct * (1 - CABLE_PULLED_WEIGHT) + cablePct * CABLE_PULLED_WEIGHT);
+      pct = totalWeight ? Math.round(equipPct * (1 - CABLE_PULLED_WEIGHT) + (weightedSum / totalWeight) * CABLE_PULLED_WEIGHT) : Math.round(equipPct);
     } else {
       pct = Math.round(equipPct);
     }
 
     var cableKeys = Object.keys(cableByRoomKey);
     var cablePulled = 0, cableTerminated = 0, cableTested = 0;
+    var cablePulledOf = 0, cableTerminatedOf = 0, cableTestedOf = 0;
     cableKeys.forEach(function(k){
       var c = cableByRoomKey[k];
-      if (c.pulled === "installed") cablePulled++;
-      if (c.terminated === "terminated") cableTerminated++;
-      if (c.tested === "pass") cableTested++;
+      if (cableCheckApplies(c, "pulled")){ cablePulledOf++; if (c.pulled === "installed") cablePulled++; }
+      if (cableCheckApplies(c, "terminated")){ cableTerminatedOf++; if (c.terminated === "terminated") cableTerminated++; }
+      if (cableCheckApplies(c, "tested")){ cableTestedOf++; if (c.tested === "pass") cableTested++; }
     });
 
     return {
       pct: pct, installed: installed, inProgress: inProgress, notStarted: notStarted,
-      cablePulled: cablePulled, cableTerminated: cableTerminated, cableTested: cableTested, cableTotalRooms: cableKeys.length
+      cablePulled: cablePulled, cableTerminated: cableTerminated, cableTested: cableTested, cableTotalRooms: cableKeys.length,
+      cablePulledOf: cablePulledOf, cableTerminatedOf: cableTerminatedOf, cableTestedOf: cableTestedOf
     };
   }
 
@@ -5733,8 +5836,8 @@
         '<div class="itd-row">' +
           itdStat(s.installed, "Installed") + itdStat(s.inProgress, "In progress") + itdStat(s.notStarted, "Not started") +
         '</div>' +
-        '<div class="itd-row" title="Rooms with cable pulled / terminated / tested, out of ' + s.cableTotalRooms + ' rooms">' +
-          itdStat(s.cablePulled + "/" + s.cableTotalRooms, "Cable pulled") + itdStat(s.cableTerminated + "/" + s.cableTotalRooms, "Terminated") + itdStat(s.cableTested + "/" + s.cableTotalRooms, "Tested") +
+        '<div class="itd-row" title="Rooms with cable pulled / terminated / tested, out of the rooms each one applies to (N/A and out of scope are left out)">' +
+          itdStat(s.cablePulled + "/" + s.cablePulledOf, "Cable pulled") + itdStat(s.cableTerminated + "/" + s.cableTerminatedOf, "Terminated") + itdStat(s.cableTested + "/" + s.cableTestedOf, "Tested") +
         '</div>' +
       '</button>';
     }).join("");
