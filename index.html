@@ -2819,9 +2819,9 @@
     var COLS = [
       { label:"#", w:26 },
       { label:"Mfr / Model", w:150 },
-      { label:"Description", w:330 },
-      { label:"Qty", w:34 },
-      { label:"Status", w:84 }
+      { label:"Description", w:210 },
+      { label:"Qty", w:30 },
+      { label:"Status", w:76 }
     ];
     var fixedW = COLS.reduce(function(s,c){ return s + c.w; }, 0);
     COLS.push({ label:"Notes", w: CW - fixedW });
@@ -2869,32 +2869,38 @@
           var mm = [it.mfr, it.model].filter(Boolean).join(" · ");
           var mmLines = PW.wrapText(mm, COLS[1].w-4, 7.5, true, 2);
           var descLines = PW.wrapText(it.description || "", COLS[2].w-4, 7.5, false, 4);
-          var nLines = Math.max(mmLines.length, descLines.length, 1);
+          var noteLines = it.notes ? PW.wrapText(String(it.notes).replace(/\s+/g, " ").trim(), COLS[5].w-6, 7.5, false, 60) : [];
+          var nLines = Math.max(mmLines.length, descLines.length, noteLines.length, 1);
           var h = Math.max(rowH, nLines * 9 + 3);
           doc.ensureSpace(h, drawColHeader);
 
           var st = pdfStatusStyle(it);
-          doc.rect(colX[4], doc.y - h + 2, COLS[4].w-4, 10, st.bg);
+          doc.rect(colX[4], doc.y - 10, COLS[4].w-4, 10, st.bg);
 
           doc.text(colX[0]+3, doc.y - 9, String(it.itemIndexInRoom), 7.5, false, PDF_COLORS.text);
           mmLines.forEach(function(line, i){ doc.text(colX[1]+3, doc.y - 9 - i*9, line, 7.5, true, PDF_COLORS.text); });
           descLines.forEach(function(line, i){ doc.text(colX[2]+3, doc.y - 9 - i*9, line, 7.5, false, PDF_COLORS.muted); });
           doc.text(colX[3]+3, doc.y - 9, String(it.qty != null ? it.qty : 1), 7.5, false, PDF_COLORS.text);
           doc.text(colX[4]+3, doc.y - 9, st.label, 7.5, false, st.fg);
-          doc.text(colX[5]+3, doc.y - 9, it.notes || "", 7.5, false, PDF_COLORS.muted);
+          noteLines.forEach(function(line, i){ doc.text(colX[5]+3, doc.y - 9 - i*9, line, 7.5, false, PDF_COLORS.muted); });
           doc.y -= h;
         });
 
         var cable = ensureCable(r.key);
         CABLE_CHECKS.forEach(function(check, i){
-          doc.ensureSpace(rowH, drawColHeader);
+          // a cable check's own note prints too, wrapped the same way
+          var cNote = String(cable[check.key + "Notes"] || "").replace(/\s+/g, " ").trim();
+          var cNoteLines = cNote ? PW.wrapText(cNote, COLS[5].w-6, 7.5, false, 60) : [];
+          var ch = Math.max(rowH, cNoteLines.length * 9 + 3);
+          doc.ensureSpace(ch, drawColHeader);
           var val = cableShownValue(cable, check.key);
           var cs = pdfCableStyle(check.key, val);
-          doc.rect(colX[4], doc.y - rowH + 2, COLS[4].w-4, 10, cs.bg);
+          doc.rect(colX[4], doc.y - 10, COLS[4].w-4, 10, cs.bg);
           doc.text(colX[0]+3, doc.y - 9, String(r.items.length + i + 1), 7.5, false, PDF_COLORS.text);
           doc.text(colX[1]+3, doc.y - 9, check.label, 7.5, true, PDF_COLORS.text);
           doc.text(colX[4]+3, doc.y - 9, cs.label, 7.5, false, cs.fg);
-          doc.y -= rowH;
+          cNoteLines.forEach(function(line, j){ doc.text(colX[5]+3, doc.y - 9 - j*9, line, 7.5, false, PDF_COLORS.muted); });
+          doc.y -= ch;
         });
       });
     });
@@ -5924,7 +5930,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, mergeDataset: mergeDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, mergeDataset: mergeDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject, buildPdfBytes: function(){ return window.PdfWriter.buildBytes(buildSchedulePdfPages()); } };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
