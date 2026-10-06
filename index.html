@@ -1977,6 +1977,21 @@
     r.items.forEach(function(it){ updateItem(it.id, { roomNumber: num, roomType: type }, true); });
     render();
   }
+  // Deletes a room: all of its items go (marked deleted on the server, so
+  // the change history can bring them back). Its cable checks stop counting
+  // because cable totals only count rooms that still have items.
+  function deleteRoom(r){
+    if(!cloudEditAllowed()){ alert("Viewers can't delete rooms."); return; }
+    if(!confirm('Delete "' + roomName(r.roomNumber) + '" and its ' + plural(r.items.length, "item") + "?\nStatuses, notes and cable checks for this room go with it.")) return;
+    var gone = {};
+    r.items.forEach(function(it){ gone[it.id] = true; delete state.items[it.id]; });
+    state.order = state.order.filter(function(id){ return !gone[id]; });
+    delete state.expandedRoom[r.key];
+    state.dirty = true;
+    updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
+    render();
+  }
   // Copies a room onto the same floor under a new name: the same equipment
   // (make, model, description, qty, in/out of scope), with every status back
   // to Not started and no notes. Cable checks start fresh, but keep which
@@ -2269,13 +2284,15 @@
       '<svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M9 6l6 6-6 6"/></svg>' +
       '<div class="room-title"><h3>' + escapeHtml(roomName(r.roomNumber)) + '</h3><span class="room-type-badge">' + escapeHtml(r.roomType) + '</span>' +
         '<button type="button" class="note-toggle room-link" data-action="rename-room" title="Change this room\'s name / number or type">rename</button>' +
-        '<button type="button" class="note-toggle room-link" data-action="copy-room" title="Make another room with the same equipment">copy</button></div>' +
+        '<button type="button" class="note-toggle room-link" data-action="copy-room" title="Make another room with the same equipment">copy</button>' +
+        '<button type="button" class="note-toggle room-link" data-action="delete-room" title="Delete this room and everything in it">delete</button></div>' +
       '<div class="room-progress"><div class="track"><div class="fill" style="width:' + rStats.pct + '%"></div></div>' +
       '<span class="frac">' + rStats.installed + '/' + rStats.scoped + '</span></div>' +
       '<div class="room-actions"><button type="button" data-action="complete-room">' + (roomAllInstalled ? "Mark room not installed" : "Mark room installed") + '</button></div>';
 
     head.querySelector('[data-action="rename-room"]').addEventListener("click", function(ev){ ev.stopPropagation(); renameRoom(r); });
     head.querySelector('[data-action="copy-room"]').addEventListener("click", function(ev){ ev.stopPropagation(); copyRoom(r); });
+    head.querySelector('[data-action="delete-room"]').addEventListener("click", function(ev){ ev.stopPropagation(); deleteRoom(r); });
     head.addEventListener("click", function(ev){
       if(ev.target.closest('[data-action="complete-room"]') || ev.target.closest(".room-link")) return;
       state.expandedRoom[r.key] = !isExpanded;
@@ -2399,7 +2416,9 @@
   }
 
   function computeCableTotals(){
-    var keys = Object.keys(state.cable);
+    var liveRooms = {};
+    state.order.forEach(function(id){ var it = state.items[id]; if(it) liveRooms[it.roomKey] = true; });
+    var keys = Object.keys(state.cable).filter(function(k){ return liveRooms[k]; });
     var pulled = 0, terminated = 0, tested = 0;
     var pulledOf = 0, terminatedOf = 0, testedOf = 0;
     keys.forEach(function(k){
@@ -5864,7 +5883,7 @@
       pct = Math.round(equipPct);
     }
 
-    var cableKeys = Object.keys(cableByRoomKey);
+    var cableKeys = Object.keys(cableByRoomKey).filter(function(k){ return roomMap[k]; }); // rooms that still have items
     var cablePulled = 0, cableTerminated = 0, cableTested = 0;
     var cablePulledOf = 0, cableTerminatedOf = 0, cableTestedOf = 0;
     cableKeys.forEach(function(k){
