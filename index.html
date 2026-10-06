@@ -204,6 +204,7 @@
   .floor.expanded > .floor-head .chevron{ transform:rotate(90deg); }
   .floor-head .floor-title{ flex:1; min-width:0; }
   .floor-head h2{ font-size:19px; font-weight:700; color:var(--text); }
+  .floor-head .floor-rename{ font-family:inherit; font-size:11.5px; font-weight:400; margin-left:8px; vertical-align:middle; }
   .floor-head .floor-meta{ font-size:12px; color:var(--text-muted); margin-top:1px; }
   .floor-progress{ flex:none; display:flex; align-items:center; gap:8px; }
   .floor-progress .track{ width:72px; height:6px; border-radius:4px; background:var(--idle-bg); overflow:hidden; }
@@ -246,6 +247,7 @@
   .room-progress .track{ width:50px; height:5px; border-radius:4px; background:var(--idle-bg); overflow:hidden; }
   .room-progress .fill{ height:100%; background:var(--good); border-radius:4px; }
   .room-progress .frac{ font-family:"IBM Plex Mono"; font-size:11px; color:var(--text-muted); }
+  .room-head .room-link{ font-family:inherit; font-size:11.5px; font-weight:400; margin-left:8px; }
   .room-actions{ flex:none; }
   .room-actions button{
     border:1px solid var(--border); background:var(--surface-2); color:var(--text);
@@ -1916,6 +1918,103 @@
     return String(a).localeCompare(String(b), undefined, { numeric: true });
   }
 
+  // How a floor is shown: a plain number reads "Floor 3"; anything typed in
+  // words ("Lobby", "Mezzanine", "Building B - Level 2") is shown as typed.
+  function floorName(v){
+    var t = String(v == null ? "" : v).trim();
+    return /^-?\d+$/.test(t) ? "Floor " + t : (t || "Floor");
+  }
+  // Renames a floor: every item on it gets the new floor text. Rooms, their
+  // statuses, notes and cable checks all stay attached (a room is tracked by
+  // its own key, which doesn't change).
+  function renameFloor(oldFloor){
+    if(!cloudEditAllowed()){ alert("Viewers can't rename floors."); return; }
+    var typed = prompt('Rename "' + floorName(oldFloor) + '" to:\n(a number shows as "Floor 3"; any other text shows exactly as typed)', String(oldFloor));
+    if(typed == null) return;
+    typed = typed.replace(/\s+/g, " ").trim().replace(/^floor\s+(-?\d+)$/i, "$1");
+    if(!typed){ alert("The floor needs a name."); return; }
+    var newFloor = /^-?\d+$/.test(typed) ? Number(typed) : typed;
+    if(String(newFloor) === String(oldFloor)) return;
+    var taken = state.order.some(function(id){ var it = state.items[id]; return it && String(it.floor) === String(newFloor); });
+    if(taken && !confirm('There is already a "' + floorName(newFloor) + '". Move these rooms onto it?')) return;
+    var wasOpen = state.expandedFloor[String(oldFloor)];
+    state.order.forEach(function(id){
+      var it = state.items[id];
+      if(it && String(it.floor) === String(oldFloor)) updateItem(id, { floor: newFloor }, true);
+    });
+    delete state.expandedFloor[String(oldFloor)];
+    if(wasOpen) state.expandedFloor[String(newFloor)] = true;
+    render();
+  }
+  // How a room is shown: one that starts with a number reads "Room 101";
+  // a name in words ("Boardroom", "Install Tracker") is shown as typed.
+  function roomName(v){
+    var t = String(v == null ? "" : v).trim();
+    return /^\d/.test(t) ? "Room " + t : (t || "Room");
+  }
+  // is there already a room with this number on this floor (other than exceptKey)?
+  function roomNumberTaken(floor, roomNumber, exceptKey){
+    return state.order.some(function(id){
+      var it = state.items[id];
+      return it && it.roomKey !== exceptKey && String(it.floor) === String(floor) && String(it.roomNumber).toLowerCase() === String(roomNumber).toLowerCase();
+    });
+  }
+  // Renames a room (its number/name and its type). Items, statuses, notes
+  // and cable checks stay attached - the room's own key doesn't change.
+  function renameRoom(r){
+    if(!cloudEditAllowed()){ alert("Viewers can't rename rooms."); return; }
+    var first = r.items[0];
+    if(!first) return;
+    var num = prompt("Room name / number:", String(r.roomNumber));
+    if(num == null) return;
+    num = num.replace(/\s+/g, " ").trim();
+    if(!num){ alert("The room needs a name or number."); return; }
+    if(roomNumberTaken(first.floor, num, r.key)){ alert('There is already a room "' + num + '" on ' + floorName(first.floor) + "."); return; }
+    var type = prompt("Room type (optional - leave blank for none):", String(r.roomType || ""));
+    if(type == null) return;
+    type = type.replace(/\s+/g, " ").trim();
+    if(num === String(r.roomNumber) && type === String(r.roomType || "")) return;
+    r.items.forEach(function(it){ updateItem(it.id, { roomNumber: num, roomType: type }, true); });
+    render();
+  }
+  // Copies a room onto the same floor under a new name: the same equipment
+  // (make, model, description, qty, in/out of scope), with every status back
+  // to Not started and no notes. Cable checks start fresh, but keep which
+  // ones are N/A or out of scope.
+  function copyRoom(r){
+    if(!cloudEditAllowed()){ alert("Viewers can't copy rooms."); return; }
+    var first = r.items[0];
+    if(!first) return;
+    var num = prompt('Copy "' + roomName(r.roomNumber) + '" with its ' + plural(r.items.length, "item") + ".\nName / number for the new room:", String(r.roomNumber) + " (copy)");
+    if(num == null) return;
+    num = num.replace(/\s+/g, " ").trim();
+    if(!num){ alert("The new room needs a name or number."); return; }
+    if(roomNumberTaken(first.floor, num, null)){ alert('There is already a room "' + num + '" on ' + floorName(first.floor) + ". Pick another name."); return; }
+    var newKey = String(first.floor) + "-" + num, n = 1;
+    while(state.order.some(function(id){ return state.items[id] && state.items[id].roomKey === newKey; }) || state.cable[newKey]){ n++; newKey = String(first.floor) + "-" + num + "~" + n; }
+    var maxIdx = 0;
+    state.order.forEach(function(id){ var it = state.items[id]; if(it && String(it.floor) === String(first.floor)) maxIdx = Math.max(maxIdx, Number(it.roomIndexOnFloor) || 0); });
+    var stamp = Date.now().toString(36);
+    r.items.forEach(function(src, i){
+      var id = "man-" + stamp + "-" + i + "-" + Math.random().toString(36).slice(2, 7);
+      state.items[id] = withDefaults({
+        id: id, floor: src.floor, roomNumber: num, roomType: src.roomType || "", roomKey: newKey,
+        roomIndexOnFloor: maxIdx + 1, itemIndexInRoom: i + 1,
+        qty: src.qty, mfr: src.mfr, model: src.model, description: src.description, inScope: src.inScope !== false
+      });
+      state.order.push(id);
+    });
+    var srcCable = state.cable[r.key] || {}, cable = ensureCable(newKey);
+    CABLE_CHECKS.forEach(function(check){
+      if(srcCable[check.key] === "na") cable[check.key] = "na";
+      if(srcCable[check.key + "InScope"] === false) cable[check.key + "InScope"] = false;
+    });
+    state.expandedRoom[newKey] = true;
+    state.dirty = true;
+    updateFileLabel();
+    cloudNotifyBulkItemsReplaced();
+    render();
+  }
   function groupByFloor(){
     var floors = {}; // floor (as string) -> {floor, rooms: {roomKey -> {...}}, roomOrder:[]}
     state.order.forEach(function(id){
@@ -2113,14 +2212,18 @@
       head.className = "floor-head";
       head.innerHTML =
         '<svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg>' +
-        '<div class="floor-title"><h2>Floor ' + f.floor + '</h2>' +
+        '<div class="floor-title"><h2>' + escapeHtml(floorName(f.floor)) + ' <button type="button" class="note-toggle floor-rename" data-action="rename-floor" title="Change this floor\'s name">rename</button></h2>' +
         '<div class="floor-meta">' + f.rooms.length + ' rooms · ' + fStats.scoped + ' in scope' + (fStats.outOfScope ? ' · ' + fStats.outOfScope + ' out of scope' : '') + '</div></div>' +
         '<div class="floor-progress"><div class="track"><div class="fill" style="width:' + fStats.pct + '%"></div></div>' +
         '<span class="frac">' + fStats.installed + '/' + fStats.scoped + '</span></div>' +
         '<div class="floor-actions"><button type="button" data-action="complete-floor">' + (floorAllInstalled ? "Mark floor not installed" : "Mark floor installed") + '</button></div>';
 
+      head.querySelector('[data-action="rename-floor"]').addEventListener("click", function(ev){
+        ev.stopPropagation();
+        renameFloor(f.floor);
+      });
       head.addEventListener("click", function(ev){
-        if(ev.target.closest('[data-action="complete-floor"]')) return;
+        if(ev.target.closest('[data-action="complete-floor"]') || ev.target.closest('[data-action="rename-floor"]')) return;
         state.expandedFloor[floorKey] = !isExpanded;
         render();
       });
@@ -2164,13 +2267,17 @@
     head.className = "room-head";
     head.innerHTML =
       '<svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M9 6l6 6-6 6"/></svg>' +
-      '<div class="room-title"><h3>Room ' + escapeHtml(r.roomNumber) + '</h3><span class="room-type-badge">' + escapeHtml(r.roomType) + '</span></div>' +
+      '<div class="room-title"><h3>' + escapeHtml(roomName(r.roomNumber)) + '</h3><span class="room-type-badge">' + escapeHtml(r.roomType) + '</span>' +
+        '<button type="button" class="note-toggle room-link" data-action="rename-room" title="Change this room\'s name / number or type">rename</button>' +
+        '<button type="button" class="note-toggle room-link" data-action="copy-room" title="Make another room with the same equipment">copy</button></div>' +
       '<div class="room-progress"><div class="track"><div class="fill" style="width:' + rStats.pct + '%"></div></div>' +
       '<span class="frac">' + rStats.installed + '/' + rStats.scoped + '</span></div>' +
       '<div class="room-actions"><button type="button" data-action="complete-room">' + (roomAllInstalled ? "Mark room not installed" : "Mark room installed") + '</button></div>';
 
+    head.querySelector('[data-action="rename-room"]').addEventListener("click", function(ev){ ev.stopPropagation(); renameRoom(r); });
+    head.querySelector('[data-action="copy-room"]').addEventListener("click", function(ev){ ev.stopPropagation(); copyRoom(r); });
     head.addEventListener("click", function(ev){
-      if(ev.target.closest('[data-action="complete-room"]')) return;
+      if(ev.target.closest('[data-action="complete-room"]') || ev.target.closest(".room-link")) return;
       state.expandedRoom[r.key] = !isExpanded;
       render();
     });
@@ -2586,7 +2693,7 @@
       var floorAllItems = [];
       f.rooms.forEach(function(r){ floorAllItems = floorAllItems.concat(r.items); });
       var fStats = computeStats(floorAllItems, f.rooms);
-      var floorLabel = "Floor " + f.floor + " — " + f.rooms.length + " rooms · " + fStats.pct + "% installed";
+      var floorLabel = floorName(f.floor) + " — " + f.rooms.length + " rooms · " + fStats.pct + "% installed";
       var floorCells = [];
       for(var c = 0; c < 9; c++){ floorCells.push(XW.xlsxCell(c, rowNum, c === 0 ? floorLabel : "", "header", false)); }
       rowsXml.push(XW.xlsxRow(rowNum, floorCells));
@@ -2594,7 +2701,7 @@
 
       f.rooms.forEach(function(r){
         var rStats = computeStats(r.items, [r]);
-        var roomLabel = "Room " + r.roomNumber + " — " + r.roomType + " · " + rStats.pct + "% installed";
+        var roomLabel = roomName(r.roomNumber) + (r.roomType ? " — " + r.roomType : "") + " · " + rStats.pct + "% installed";
         var roomCells = [];
         for(var c2 = 0; c2 < 9; c2++){ roomCells.push(XW.xlsxCell(c2, rowNum, c2 === 0 ? roomLabel : "", "divider", false)); }
         rowsXml.push(XW.xlsxRow(rowNum, roomCells));
@@ -2695,13 +2802,13 @@
       var floorAllItems = [];
       f.rooms.forEach(function(r){ floorAllItems = floorAllItems.concat(r.items); });
       var fStats = computeStats(floorAllItems, f.rooms);
-      html += '<div class="pr-floor"><div class="pr-floor-head"><h2>Floor ' + f.floor + '</h2>' +
+      html += '<div class="pr-floor"><div class="pr-floor-head"><h2>' + escapeHtml(floorName(f.floor)) + '</h2>' +
         '<span>' + f.rooms.length + ' rooms · ' + fStats.installed + '/' + fStats.scoped + ' installed (' + fStats.pct + '%)' + (fStats.outOfScope ? ' · ' + fStats.outOfScope + ' out of scope' : '') + '</span></div>';
 
       f.rooms.forEach(function(r){
         var rStats = computeStats(r.items, [r]);
         html += '<div class="pr-room">' +
-          '<div class="pr-room-head"><h3>Room ' + escapeHtml(r.roomNumber) + '</h3>' +
+          '<div class="pr-room-head"><h3>' + escapeHtml(roomName(r.roomNumber)) + '</h3>' +
           '<span class="pr-room-type">' + escapeHtml(r.roomType) + '</span>' +
           '<span class="pr-room-stat">' + rStats.installed + '/' + rStats.scoped + ' installed (' + rStats.pct + '%)' + (rStats.outOfScope ? ' · ' + rStats.outOfScope + ' oos' : '') + '</span></div>' +
           '<table><thead><tr><th>#</th><th>Mfr / Model</th><th>Description</th><th>Qty</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
@@ -2858,13 +2965,13 @@
     floors.forEach(function(f){
       doc.ensureSpace(20, drawColHeader);
       doc.rect(CL, doc.y - 16, CW, 16, PDF_COLORS.navy);
-      doc.text(CL+4, doc.y-12, "Floor " + f.floor, 9, true, PDF_COLORS.white);
+      doc.text(CL+4, doc.y-12, floorName(f.floor), 9, true, PDF_COLORS.white);
       doc.y -= 18;
 
       f.rooms.forEach(function(r){
         doc.ensureSpace(16, drawColHeader);
         doc.rect(CL, doc.y - 14, CW, 14, PDF_COLORS.tan);
-        doc.text(CL+4, doc.y-10, "Room " + r.roomNumber + " - " + r.roomType, 8.5, true, PDF_COLORS.text);
+        doc.text(CL+4, doc.y-10, roomName(r.roomNumber) + (r.roomType ? " - " + r.roomType : ""), 8.5, true, PDF_COLORS.text);
         doc.y -= 16;
 
         r.items.forEach(function(it){
@@ -3893,7 +4000,7 @@
     var sel = document.getElementById("addRoomSel");
     var rooms = addRoomsOnHand();
     sel.innerHTML = '<option value="__new">+ New room</option>' + rooms.map(function(r){
-      return '<option value="' + escapeHtml(r.key) + '">Floor ' + escapeHtml(String(r.floor)) + " · Room " + escapeHtml(String(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
+      return '<option value="' + escapeHtml(r.key) + '">' + escapeHtml(floorName(r.floor)) + " · " + escapeHtml(roomName(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
     }).join("");
     sel.value = "__new";
     ["addRoomNo", "addRoomType", "addMfr", "addModel", "addDesc"].forEach(function(id){ document.getElementById(id).value = ""; });
@@ -3929,8 +4036,8 @@
       if(!roomNumber){ addItemSetError("Enter a room #."); return; }
       roomKey = String(floor) + "-" + roomNumber;
       var existing = addRoomsOnHand();
-      if(existing.some(function(r){ return r.key === roomKey; })){
-        addItemSetError("Room " + roomNumber + " already exists on floor " + floor + ". Pick it from the Room list.");
+      if(existing.some(function(r){ return r.key === roomKey || (String(r.floor) === String(floor) && String(r.roomNumber) === String(roomNumber)); })){
+        addItemSetError(roomName(roomNumber) + " already exists on " + floorName(floor) + ". Pick it from the Room list.");
         return;
       }
       roomType = val("addRoomType");
@@ -4969,7 +5076,7 @@
       item.textContent = itItemLabel(hit.data || {});
       var projLine = document.createElement("div");
       projLine.className = "fh-proj";
-      var loc = [hit.data && hit.data.floor != null ? "Floor " + hit.data.floor : "", hit.data && hit.data.roomNumber].filter(Boolean).join(" · ");
+      var loc = [hit.data && hit.data.floor != null ? floorName(hit.data.floor) : "", hit.data && hit.data.roomNumber].filter(Boolean).join(" · ");
       projLine.textContent = (hit.it_projects && hit.it_projects.name || "Untitled project") + (loc ? " · " + loc : "");
       info.appendChild(item); info.appendChild(projLine);
       var btn = document.createElement("button");
