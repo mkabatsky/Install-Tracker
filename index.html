@@ -3152,7 +3152,17 @@
     return null;
   }
 
-  function applyExcelProgress(sheets){
+  // Applies an edited "Export Excel" sheet to the open project. Each item row
+  // is matched to an item here, in this order:
+  //   1. same floor, room, Mfr / Model and Description -> status / notes / qty updated
+  //   2. same floor, room and "#" (its position in the room) -> the row is an
+  //      EDIT of that item: its Mfr / Model, Description and Qty are updated too
+  //   3. no match -> a NEW item, added to that room (the room is created if needed)
+  // A blank Floor / Room cell means "same as the row above", so new rows typed
+  // under a room don't need them filled in. Nothing is ever deleted from here:
+  // rows removed from the sheet are left alone in the project.
+  // Edits and additions are listed and confirmed before anything is changed.
+  function applyExcelProgress(sheets, askFirst){
     if(!state.order.length){
       return { error: "This spreadsheet has nothing to load progress into yet - build the schedule with Load BOM first, then load progress on top of it." };
     }
@@ -3169,83 +3179,155 @@
     }
     if(!rows) return { error: "That doesn't look like an Install Tracker Excel export (Export Excel) - the expected columns weren't found." };
 
-    var usedIds = {};
-    var curFloor = null, curRoomNumber = null;
-    var applied = 0, cableApplied = 0, cableTouched = {};
-    var changed = 0, unmatched = 0, unreadStatus = 0;
+    function cell(v){ return String(v == null ? "" : v).replace(/\s+/g, " ").trim(); }
+    function mmOf(it){ return [it.mfr, it.model].filter(Boolean).join(" · "); }
+    function splitMm(text){
+      var parts = text.split("·");
+      if(parts.length < 2) return { mfr: "", model: text };
+      return { mfr: cell(parts.shift()), model: cell(parts.join("·")) };
+    }
+    function qtyOf(v){ var n = parseQty(v); return n != null && n >= 0 ? n : null; }
 
+    // ---- pass 1: read the sheet into item rows and cable rows ----
+    var plan = [];
+    var curFloor = null, curRoom = null, curType = "";
     rows.forEach(function(row){
       if(!row || !row.length) return;
-      var col0 = row[0], col1 = row[1], col3 = row[3], col4 = row[4], col5 = row[5], col7 = row[7], col8 = row[8];
-      var mm = String(col4 == null ? "" : col4).trim();
-      var desc = String(col5 == null ? "" : col5).trim();
-
-      if(mm !== ""){
-        // an item row - floor/room come straight off this row, not tracked
-        // separately, so a non-numeric floor label (e.g. "B1") works fine
-        curFloor = col0; curRoomNumber = String(col1 == null ? "" : col1).trim();
-        var statusLabel = String(col7 == null ? "" : col7).trim();
-        var match = null;
-        for(var i = 0; i < state.order.length; i++){
-          var id = state.order[i];
-          if(usedIds[id]) continue;
-          var it = state.items[id];
-          if(!it) continue;
-          if(looseText(it.floor) !== looseText(curFloor)) continue;
-          if(looseText(it.roomNumber) !== looseText(curRoomNumber)) continue;
-          if(looseText([it.mfr, it.model].filter(Boolean).join(" · ")) !== looseText(mm)) continue;
-          if(looseText(it.description) !== looseText(desc)) continue;
-          match = it; usedIds[id] = true; break;
-        }
-        if(match){
-          var before = JSON.stringify([match.inScope, match.status, match.notes]);
-          var newStatus = excelStatusFromLabel(statusLabel);
-          if(looseText(statusLabel) === "out of scope") match.inScope = false;
-          else if(newStatus){ match.inScope = true; match.status = newStatus; }
-          else if(statusLabel) unreadStatus++;
-          if(col8 != null) match.notes = String(col8);
-          if(JSON.stringify([match.inScope, match.status, match.notes]) !== before){ match.updatedAt = new Date().toISOString(); changed++; }
-          applied++;
-        } else {
-          unmatched++;
-        }
+      var c0 = cell(row[0]), c1 = cell(row[1]), c2 = cell(row[2]), c3 = cell(row[3]), mm = cell(row[4]), desc = cell(row[5]), c6 = cell(row[6]), c7 = cell(row[7]);
+      var notes = row[8] == null ? null : String(row[8]);
+      if(c3 === "" && c6 === "" && mm === "" && desc === "") return;                 // a floor / room divider, or a blank line
+      var check = mm === "" ? CABLE_CHECKS.filter(function(c){ return looseText(c.label) === looseText(desc); })[0] : null;
+      if(check){
+        if(curRoom != null) plan.push({ kind: "cable", check: check, floor: curFloor, room: curRoom, value: c7, notes: notes });
         return;
       }
+      if(mm === "" && desc === "") return;
+      // an item row; Floor / Room left blank = same as the row above
+      if(c1 !== ""){ curRoom = c1; curType = c2; if(c0 !== "") curFloor = /^-?\d+$/.test(c0) ? Number(c0) : c0; }
+      else if(c0 !== "" && curRoom == null){ curFloor = /^-?\d+$/.test(c0) ? Number(c0) : c0; }
+      if(curRoom == null || curFloor == null) return;
+      plan.push({ kind: "item", floor: curFloor, room: curRoom, roomType: curType, idx: c3, mm: mm, desc: desc, qty: qtyOf(row[6]), status: c7, notes: notes });
+    });
 
-      // not an item row - a cable-check row has an empty Mfr/Model but a
-      // running index in "#" and one of the cable check labels in
-      // "Description"; anything else (a floor/room divider row) is skipped
-      var label = String(col5 == null ? "" : col5).trim();
-      if(col3 == null || String(col3).trim() === "" || !label || curRoomNumber == null) return;
-      var check = CABLE_CHECKS.filter(function(c){ return looseText(c.label) === looseText(label); })[0];
-      if(!check) return;
-      var realKey = null;
+    // ---- pass 2: decide what each item row is (same / edit / new) ----
+    var used = {};
+    function sameRoom(it, p){ return looseText(it.floor) === looseText(p.floor) && looseText(it.roomNumber) === looseText(p.room); }
+    plan.forEach(function(p){
+      if(p.kind !== "item") return;
+      for(var i = 0; i < state.order.length && !p.match; i++){
+        var id = state.order[i], it = state.items[id];
+        if(!it || used[id] || !sameRoom(it, p)) continue;
+        if(looseText(mmOf(it)) === looseText(p.mm) && looseText(it.description) === looseText(p.desc)){ p.match = id; used[id] = true; }
+      }
+    });
+    plan.forEach(function(p){
+      if(p.kind !== "item" || p.match) return;
+      for(var i = 0; i < state.order.length && !p.match; i++){
+        var id = state.order[i], it = state.items[id];
+        if(!it || used[id] || !sameRoom(it, p)) continue;
+        if(p.idx !== "" && String(it.itemIndexInRoom) === p.idx){ p.match = id; p.edit = true; used[id] = true; }
+      }
+      if(!p.match) p.add = true;
+    });
+    var edits = plan.filter(function(p){ return p.edit; }), adds = plan.filter(function(p){ return p.add; });
+    if(edits.length || adds.length){
+      var describe = function(p){ return "  • " + roomName(p.room) + ": " + (p.mm || p.desc); };
+      var msg = "This spreadsheet changes the equipment list, not just statuses:\n\n" +
+        (edits.length ? plural(edits.length, "item") + " edited (Mfr / Model, Description or Qty):\n" + edits.slice(0, 6).map(describe).join("\n") + (edits.length > 6 ? "\n  …and " + (edits.length - 6) + " more" : "") + "\n\n" : "") +
+        (adds.length ? plural(adds.length, "new item") + " added:\n" + adds.slice(0, 6).map(describe).join("\n") + (adds.length > 6 ? "\n  …and " + (adds.length - 6) + " more" : "") + "\n\n" : "") +
+        "Apply these changes to the project?\n(Cancel = nothing at all is changed.)";
+      if(!(askFirst || window.confirm)(msg)) return { cancelled: true };
+    }
+
+    // ---- pass 3: apply ----
+    var applied = 0, changed = 0, edited = 0, added = 0, unreadStatus = 0, cableApplied = 0, cableTouched = {};
+    function setProgress(it, p){
+      var st = excelStatusFromLabel(p.status);
+      if(looseText(p.status) === "out of scope") it.inScope = false;
+      else if(st){ it.inScope = true; it.status = st; }
+      else if(p.status) unreadStatus++;
+      if(p.notes != null) it.notes = p.notes;
+    }
+    function roomKeyFor(p){
       for(var j = 0; j < state.order.length; j++){
-        var itj = state.items[state.order[j]];
-        if(itj && looseText(itj.floor) === looseText(curFloor) && looseText(itj.roomNumber) === looseText(curRoomNumber)){ realKey = itj.roomKey; break; }
+        var it = state.items[state.order[j]];
+        if(it && sameRoom(it, p)) return it.roomKey;
       }
-      if(!realKey) return;
-      var valueLabel = String(col7 == null ? "" : col7).trim();
-      var cable = ensureCable(realKey);
-      var cableBefore = JSON.stringify(cable);
-      if(looseText(valueLabel) === "out of scope"){
-        cable[check.key + "InScope"] = false;
+      return null;
+    }
+    plan.forEach(function(p){
+      if(p.kind !== "item") return;
+      if(p.match){
+        var it = state.items[p.match];
+        var before = itItemJsonSafe(it);
+        if(p.edit){
+          var m = splitMm(p.mm);
+          it.mfr = m.mfr; it.model = m.model; it.description = p.desc;
+        }
+        if(p.qty != null) it.qty = p.qty;
+        setProgress(it, p);
+        if(itItemJsonSafe(it) !== before){ it.updatedAt = new Date().toISOString(); changed++; if(p.edit) edited++; }
+        applied++;
+        return;
+      }
+      // a new item
+      var key = roomKeyFor(p), roomIndexOnFloor, roomType = p.roomType;
+      if(key){
+        var mate = null;
+        state.order.forEach(function(id){ var o = state.items[id]; if(!mate && o && o.roomKey === key) mate = o; });
+        roomIndexOnFloor = mate.roomIndexOnFloor; roomType = mate.roomType;
       } else {
-        var opt = check.options.filter(function(o){ return looseText(o.label) === looseText(valueLabel); })[0];
-        if(!opt) return;
-        cable[check.key] = opt.value;
-        if(cable[check.key + "InScope"] === false) cable[check.key + "InScope"] = true;
+        key = String(p.floor) + "-" + p.room;
+        var n = 1;
+        while(state.cable[key] || state.order.some(function(id){ return state.items[id] && state.items[id].roomKey === key; })){ n++; key = String(p.floor) + "-" + p.room + "~" + n; }
+        roomIndexOnFloor = 0;
+        state.order.forEach(function(id){ var o = state.items[id]; if(o && looseText(o.floor) === looseText(p.floor)) roomIndexOnFloor = Math.max(roomIndexOnFloor, Number(o.roomIndexOnFloor) || 0); });
+        roomIndexOnFloor += 1;
       }
-      if(col8) cable[check.key + "Notes"] = String(col8);
-      if(JSON.stringify(cable) !== cableBefore) changed++;
-      if(!cableTouched[realKey]){ cableTouched[realKey] = true; cableApplied++; }
+      var taken = {}, count = 0;
+      state.order.forEach(function(id){ var o = state.items[id]; if(o && o.roomKey === key){ taken[String(o.itemIndexInRoom)] = true; count++; } });
+      var idx = /^\d+$/.test(p.idx) && !taken[p.idx] ? Number(p.idx) : count + 1;
+      while(taken[String(idx)]) idx++;
+      var mNew = splitMm(p.mm);
+      var id = "man-" + Date.now().toString(36) + "-" + added + "-" + Math.random().toString(36).slice(2, 7);
+      state.items[id] = withDefaults({
+        id: id, floor: p.floor, roomNumber: p.room, roomType: roomType || "", roomKey: key,
+        roomIndexOnFloor: roomIndexOnFloor, itemIndexInRoom: idx,
+        qty: p.qty != null ? p.qty : 1, mfr: mNew.mfr, model: mNew.model, description: p.desc
+      });
+      state.order.push(id);
+      ensureCable(key);
+      setProgress(state.items[id], p);
+      state.items[id].updatedAt = new Date().toISOString();
+      added++; changed++; applied++;
+    });
+    plan.forEach(function(p){
+      if(p.kind !== "cable") return;
+      var key = roomKeyFor(p);
+      if(!key) return;
+      var cable = ensureCable(key), before = JSON.stringify(cable), ck = p.check.key;
+      if(looseText(p.value) === "out of scope"){
+        cable[ck + "InScope"] = false;
+      } else {
+        var opt = p.check.options.filter(function(o){ return looseText(o.label) === looseText(p.value); })[0];
+        if(!opt) return;
+        cable[ck] = opt.value;
+        if(cable[ck + "InScope"] === false) cable[ck + "InScope"] = true;
+      }
+      if(p.notes) cable[ck + "Notes"] = p.notes;
+      if(JSON.stringify(cable) !== before) changed++;
+      if(!cableTouched[key]){ cableTouched[key] = true; cableApplied++; }
     });
 
     state.dirty = true;
     updateFileLabel();
     cloudNotifyBulkItemsReplaced(); // save what was just loaded
     render();
-    return { applied: applied, cableApplied: cableApplied, changed: changed, unmatched: unmatched, unreadStatus: unreadStatus };
+    return { applied: applied, cableApplied: cableApplied, changed: changed, edited: edited, added: added, unreadStatus: unreadStatus };
+  }
+  // one item as text, for "did this row change anything?" (the fields a sheet can touch)
+  function itItemJsonSafe(it){
+    return JSON.stringify([it.mfr, it.model, it.description, it.qty, it.inScope, it.status, it.notes]);
   }
 
   function loadProgress(file){
@@ -3253,10 +3335,12 @@
       window.XlsxReader.readFile(file).then(function(sheets){
         var res = applyExcelProgress(sheets);
         if(res.error){ alert(res.error); return; }
+        if(res.cancelled) return;
         alert("Read " + plural(res.applied, "item") + (res.cableApplied ? " and cable status for " + plural(res.cableApplied, "room") : "") + " from " + file.name + ".\n" +
-          (res.changed ? plural(res.changed, "line") + " changed and saved." : "Nothing was different from what's already here, so nothing changed.") +
-          (res.unmatched ? "\n\n" + plural(res.unmatched, "row") + " in the file didn't match any item in this project (floor, room, Mfr / Model and Description all have to match) and " + (res.unmatched === 1 ? "was" : "were") + " skipped." : "") +
-          (res.unreadStatus ? "\n\n" + plural(res.unreadStatus, "Status cell") + " couldn't be understood and " + (res.unreadStatus === 1 ? "was" : "were") + " left as is. Use: Not started, In progress, Installed, or Out of scope." : ""));
+          (res.changed ? plural(res.changed, "line") + " changed and saved" +
+              (res.edited || res.added ? " (" + [res.edited ? plural(res.edited, "item") + " edited" : "", res.added ? plural(res.added, "new item") + " added" : ""].filter(Boolean).join(", ") + ")" : "") + "."
+            : "Nothing was different from what's already here, so nothing changed.") +
+          (res.unreadStatus ? "\n\n" + plural(res.unreadStatus, "Status cell") + " couldn't be understood and " + (res.unreadStatus === 1 ? "was" : "were") + " left as is. Use: Not started, In progress, Installed (or Completed), or Out of scope." : ""));
       }).catch(function(e){ alert("Couldn't read that Excel file: " + (e && e.message ? e.message : e)); });
       return;
     }
