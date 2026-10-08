@@ -808,7 +808,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 25 - October 8, 2026">Build 25</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 26 - October 8, 2026">Build 26</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -1412,19 +1412,65 @@
       183:278
     };
 
+    // the Western European characters above the basic set: accents, (R), TM,
+    // long dashes, curly quotes... (widths from the same Helvetica tables)
+    (function(){
+      function put(t, list){ for(var i = 0; i < list.length; i += 2) t[list[i]] = list[i + 1]; }
+      function span(t, from, to, w){ for(var c = from; c <= to; c++) t[c] = w; }
+      [HELV_WIDTHS, HELVB_WIDTHS].forEach(function(t, bold){
+        put(t, [0x80,556, 0x82,bold?278:222, 0x83,556, 0x84,bold?500:333, 0x85,1000, 0x86,556, 0x87,556, 0x88,333, 0x89,1000, 0x8A,667, 0x8B,333, 0x8C,1000, 0x8E,611,
+          0x91,bold?278:222, 0x92,bold?278:222, 0x93,bold?500:333, 0x94,bold?500:333, 0x95,350, 0x96,556, 0x97,1000, 0x98,333, 0x99,1000, 0x9A,bold?556:500, 0x9B,333, 0x9C,944, 0x9E,500, 0x9F,667,
+          0xA0,278, 0xA1,333, 0xA2,556, 0xA3,556, 0xA4,556, 0xA5,556, 0xA6,bold?280:260, 0xA7,556, 0xA8,333, 0xA9,737, 0xAA,370, 0xAB,556, 0xAC,584, 0xAD,333, 0xAE,737, 0xAF,333,
+          0xB0,400, 0xB1,584, 0xB2,333, 0xB3,333, 0xB4,333, 0xB5,bold?611:556, 0xB6,bold?556:537, 0xB8,333, 0xB9,333, 0xBA,365, 0xBB,556, 0xBC,834, 0xBD,834, 0xBE,834, 0xBF,611,
+          0xC6,1000, 0xC7,722, 0xD0,722, 0xD1,722, 0xD7,584, 0xD8,778, 0xDD,667, 0xDE,667, 0xDF,611, 0xE6,889, 0xE7,bold?556:500, 0xF0,bold?611:556, 0xF1,bold?611:556, 0xF7,584, 0xF8,611,
+          0xFD,bold?556:500, 0xFE,bold?611:556, 0xFF,bold?556:500]);
+        span(t, 0xC0, 0xC5, bold?722:667); span(t, 0xC8, 0xCB, 667); span(t, 0xCC, 0xCF, 278); span(t, 0xD2, 0xD6, 778); span(t, 0xD9, 0xDC, 722);
+        span(t, 0xE0, 0xE5, 556); span(t, 0xE8, 0xEB, 556); span(t, 0xEC, 0xEF, 278); span(t, 0xF2, 0xF6, bold?611:556); span(t, 0xF9, 0xFC, bold?611:556);
+      });
+    })();
+
+    // The PDF's built-in Helvetica only has the Western European ("WinAnsi")
+    // characters, one byte each. toWinAnsi turns whatever was typed or pasted
+    // into those bytes, so a registered mark, a trademark sign, a long dash or
+    // a curly quote prints as itself. (They used to come out as "?".) Running
+    // it on text that has already been through it changes nothing.
+    var WINANSI_HIGH = {0x20AC:0x80, 0x201A:0x82, 0x0192:0x83, 0x201E:0x84, 0x2026:0x85, 0x2020:0x86, 0x2021:0x87, 0x02C6:0x88, 0x2030:0x89, 0x0160:0x8A, 0x2039:0x8B, 0x0152:0x8C, 0x017D:0x8E,
+      0x2018:0x91, 0x2019:0x92, 0x201C:0x93, 0x201D:0x94, 0x2022:0x95, 0x2013:0x96, 0x2014:0x97, 0x02DC:0x98, 0x2122:0x99, 0x0161:0x9A, 0x203A:0x9B, 0x0153:0x9C, 0x017E:0x9E, 0x0178:0x9F};
+    // the nearest thing, for characters Helvetica doesn't have
+    var WINANSI_SUBST = {0x00A0:" ", 0x2002:" ", 0x2003:" ", 0x2009:" ", 0x200A:" ", 0x202F:" ", 0x2010:"-", 0x2011:"-", 0x2012:"-", 0x2015:"-", 0x2212:"-",
+      0x2032:"'", 0x2033:'"', 0x2044:"/", 0x2190:"<-", 0x2192:"->", 0x2264:"<=", 0x2265:">=", 0x2260:"!=", 0x2248:"~", 0x2126:"Ohm", 0x03A9:"Ohm", 0x03BC:String.fromCharCode(0xB5),
+      0x25CF:String.fromCharCode(0x95), 0x25AA:String.fromCharCode(0x95), 0x2713:"x", 0x2714:"x", 0x2033:'"'};
+    function toWinAnsi(s){
+      s = s == null ? "" : String(s);
+      var out = "";
+      for(var i = 0; i < s.length; i++){
+        var code = s.charCodeAt(i);
+        if(code >= 32 && code <= 126){ out += s[i]; continue; }
+        if(code === 9 || code === 10 || code === 13){ out += " "; continue; }
+        if(code >= 0x80 && code <= 0x9F){ out += s[i]; continue; }        // already a WinAnsi byte
+        if(code >= 0xA1 && code <= 0xFF){ out += s[i]; continue; }        // the same byte in WinAnsi as in Unicode
+        if(WINANSI_HIGH[code]){ out += String.fromCharCode(WINANSI_HIGH[code]); continue; }
+        if(Object.prototype.hasOwnProperty.call(WINANSI_SUBST, code)){ out += WINANSI_SUBST[code]; continue; }
+        if(code < 32 || code === 0x200B || code === 0x200C || code === 0x200D || code === 0xFEFF) continue;   // invisible
+        if(code >= 0xD800 && code <= 0xDBFF) i++;                         // an emoji is two halves: one "?" for both
+        out += "?";
+      }
+      return out;
+    }
+
     function charWidth(ch, bold){
       var table = bold ? HELVB_WIDTHS : HELV_WIDTHS;
       var code = ch.charCodeAt(0);
       return table[code] != null ? table[code] : 556;
     }
     function textWidth(text, size, bold){
-      text = text || "";
+      text = toWinAnsi(text);
       var w = 0;
       for(var i=0;i<text.length;i++){ w += charWidth(text[i], bold); }
       return w * size / 1000;
     }
     function wrapText(text, maxWidth, size, bold, maxLines){
-      text = text || "";
+      text = toWinAnsi(text);
       var words = text.split(" ");
       var lines = [];
       var cur = "";
@@ -1463,27 +1509,25 @@
       return lines.length ? lines : [""];
     }
     function escapePdfString(s){
-      s = s == null ? "" : String(s);
+      s = toWinAnsi(s);
       var out = "";
       for(var i=0;i<s.length;i++){
         var ch = s[i];
-        var code = s.charCodeAt(i);
         if(ch === "\\") out += "\\\\";
         else if(ch === "(") out += "\\(";
         else if(ch === ")") out += "\\)";
-        else if(code === 183) out += ch; // periodcentered "·", valid WinAnsi byte
-        else if(code >= 32 && code <= 126) out += ch;
-        else out += "?";
+        else out += ch;   // every character is one WinAnsi byte by now
       }
       return out;
     }
 
-    var PAGE_W = 792, PAGE_H = 612, MARGIN = 32;
+    var PAGE_W = 792, PAGE_H = 612, MARGIN = 36;
     var CONTENT_TOP = PAGE_H - MARGIN, CONTENT_BOTTOM = MARGIN;
     var CONTENT_LEFT = MARGIN, CONTENT_RIGHT = PAGE_W - MARGIN;
     var CONTENT_WIDTH = CONTENT_RIGHT - CONTENT_LEFT;
 
     function fmt(n){ return (Math.round(n*100)/100).toString(); }
+    function rgb(color){ return color[0].toFixed(3) + " " + color[1].toFixed(3) + " " + color[2].toFixed(3); }
 
     function createDoc(){
       var pages = [];
@@ -1501,6 +1545,23 @@
         curOps.push(color[0].toFixed(3) + " " + color[1].toFixed(3) + " " + color[2].toFixed(3) +
           " rg BT " + font + " " + size.toFixed(1) + " Tf " + fmt(x) + " " + fmt(y) + " Td (" + esc + ") Tj ET\n");
       };
+      // a filled box with rounded corners (status pills, the floor bands, the summary card)
+      doc.roundRect = function(x, y, w, h, r, color){
+        r = Math.max(0, Math.min(r, w / 2, h / 2));
+        var k = 0.5523 * r, x2 = x + w, y2 = y + h;
+        curOps.push(rgb(color) + " rg " +
+          fmt(x + r) + " " + fmt(y) + " m " + fmt(x2 - r) + " " + fmt(y) + " l " +
+          fmt(x2 - r + k) + " " + fmt(y) + " " + fmt(x2) + " " + fmt(y + r - k) + " " + fmt(x2) + " " + fmt(y + r) + " c " +
+          fmt(x2) + " " + fmt(y2 - r) + " l " +
+          fmt(x2) + " " + fmt(y2 - r + k) + " " + fmt(x2 - r + k) + " " + fmt(y2) + " " + fmt(x2 - r) + " " + fmt(y2) + " c " +
+          fmt(x + r) + " " + fmt(y2) + " l " +
+          fmt(x + r - k) + " " + fmt(y2) + " " + fmt(x) + " " + fmt(y2 - r + k) + " " + fmt(x) + " " + fmt(y2 - r) + " c " +
+          fmt(x) + " " + fmt(y + r) + " l " +
+          fmt(x) + " " + fmt(y + r - k) + " " + fmt(x + r - k) + " " + fmt(y) + " " + fmt(x + r) + " " + fmt(y) + " c h f\n");
+      };
+      // text that ends at xRight / is centred on xMid
+      doc.textRight = function(xRight, y, s, size, bold, color){ doc.text(xRight - textWidth(s, size, bold), y, s, size, bold, color); };
+      doc.textCenter = function(xMid, y, s, size, bold, color){ doc.text(xMid - textWidth(s, size, bold) / 2, y, s, size, bold, color); };
       doc.newPage = function(){
         pages.push(curOps.join(""));
         curOps = [];
@@ -1512,13 +1573,17 @@
           if(redrawHeader) redrawHeader();
         }
       };
-      doc.finish = function(){
+      // footerLeft: what the report is, printed small at the bottom of every page
+      doc.finish = function(footerLeft){
         pages.push(curOps.join(""));
         var total = pages.length;
+        var ink = [0.4, 0.42, 0.33], rule = [0.86, 0.84, 0.78];
+        var left = footerLeft ? wrapText(footerLeft, CONTENT_WIDTH - 90, 7.5, false, 1)[0] : "";
         return pages.map(function(content, i){
-          var c = [0.4, 0.42, 0.33];
-          var footer = c[0].toFixed(3) + " " + c[1].toFixed(3) + " " + c[2].toFixed(3) +
-            " rg BT /F1 7.5 Tf " + fmt(CONTENT_RIGHT-70) + " " + fmt(CONTENT_BOTTOM-10) + " Td (Page " + (i+1) + " of " + total + ") Tj ET\n";
+          var pageText = "Page " + (i+1) + " of " + total;
+          var footer = rgb(rule) + " rg " + fmt(CONTENT_LEFT) + " " + fmt(CONTENT_BOTTOM - 6) + " " + fmt(CONTENT_WIDTH) + " 0.5 re f\n" +
+            rgb(ink) + " rg BT /F1 7.5 Tf " + fmt(CONTENT_RIGHT - textWidth(pageText, 7.5, false)) + " " + fmt(CONTENT_BOTTOM - 16) + " Td (" + pageText + ") Tj ET\n" +
+            (left ? rgb(ink) + " rg BT /F1 7.5 Tf " + fmt(CONTENT_LEFT) + " " + fmt(CONTENT_BOTTOM - 16) + " Td (" + escapePdfString(left) + ") Tj ET\n" : "");
           return content + footer;
         });
       };
@@ -1531,7 +1596,7 @@
       return bytes;
     }
 
-    function buildBytes(pagesContent){
+    function buildBytes(pagesContent, title){
       var objs = [];
       function addObj(body){ objs.push(body); return objs.length; }
 
@@ -1556,6 +1621,7 @@
       objs[pagesId - 1] = "<< /Type /Pages /Kids [" + kids + "] /Count " + pageIds.length + " >>";
 
       var catalogId = addObj("<< /Type /Catalog /Pages " + pagesId + " 0 R >>");
+      var infoId = addObj("<< /Title (" + escapePdfString(title || "Install Tracker") + ") /Creator (Install Tracker) /Producer (Install Tracker) >>");
 
       var out = ["%PDF-1.4\n"];
       var offsets = new Array(objs.length + 1).fill(0);
@@ -1572,7 +1638,7 @@
       for(var j=1;j<=objs.length;j++){
         out.push(String(offsets[j]).padStart(10,"0") + " 00000 n \n");
       }
-      out.push("trailer\n<< /Size " + (objs.length+1) + " /Root " + catalogId + " 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF");
+      out.push("trailer\n<< /Size " + (objs.length+1) + " /Root " + catalogId + " 0 R /Info " + infoId + " 0 R >>\nstartxref\n" + xrefPos + "\n%%EOF");
 
       return strToBytesLatin1(out.join(""));
     }
@@ -1581,7 +1647,7 @@
       PAGE_W: PAGE_W, PAGE_H: PAGE_H, MARGIN: MARGIN,
       CONTENT_TOP: CONTENT_TOP, CONTENT_BOTTOM: CONTENT_BOTTOM,
       CONTENT_LEFT: CONTENT_LEFT, CONTENT_RIGHT: CONTENT_RIGHT, CONTENT_WIDTH: CONTENT_WIDTH,
-      textWidth: textWidth, wrapText: wrapText, escapeString: escapePdfString,
+      textWidth: textWidth, wrapText: wrapText, escapeString: escapePdfString, toWinAnsi: toWinAnsi,
       createDoc: createDoc, buildBytes: buildBytes
     };
   })(typeof window !== "undefined" ? window : globalThis);
@@ -2983,7 +3049,13 @@
     goldBg:[0xF7/255,0xEC/255,0xD4/255], goldFg:[0x8a/255,0x66/255,0x1a/255],
     grayBg:[0xEA/255,0xE6/255,0xD6/255], grayFg:[0x6a/255,0x6b/255,0x58/255],
     redBg:[0xF3/255,0xE1/255,0xE1/255], redFg:[0xa5/255,0x3f/255,0x3f/255],
-    headerBg:[0.90,0.90,0.86]
+    headerBg:[0.955,0.948,0.925],
+    ink2:[0x45/255,0x4b/255,0x57/255],      // descriptions: a step lighter than names
+    faint:[0x9a/255,0x9c/255,0x93/255],     // out-of-scope lines
+    rule:[0xE6/255,0xE2/255,0xD6/255],      // the hairline under each line
+    border:[0xDD/255,0xD4/255,0xBD/255],
+    strip:[0xF8/255,0xF6/255,0xEF/255],     // the cable line at the foot of a room
+    onNavy:[0xC9/255,0xD3/255,0xE6/255]
   };
 
   function pdfStatusStyle(it){
@@ -2999,159 +3071,282 @@
     if(value === "fail") return { label:label, bg:PDF_COLORS.redBg, fg:PDF_COLORS.redFg };
     return { label:label, bg:PDF_COLORS.grayBg, fg:PDF_COLORS.grayFg };
   }
+  // "Cable Pulled?" -> "Pulled", "Power Test?" -> "Power test" (the line they sit on already says CABLE)
+  function pdfCableLabel(check){
+    var t = String(check.label || "").replace(/\?+\s*$/, "").replace(/^cable\s+/i, "").trim();
+    return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  }
+  // A status as a small rounded tag, centred up-and-down on centerY.
+  var PDF_PILL_W = 58, PDF_PILL_H = 11.5;
+  function drawPdfPill(doc, x, centerY, style){
+    doc.roundRect(x, centerY - PDF_PILL_H / 2, PDF_PILL_W, PDF_PILL_H, 3.5, style.bg);
+    doc.textCenter(x + PDF_PILL_W / 2, centerY - 2.55, style.label, 7.2, true, style.fg);
+  }
 
-  // Progress dashboard at the top of the PDF — mirrors the on-screen summary card.
+  // Top of the first page: what the report is, whose it is, and when it was made.
+  function drawPdfTitle(doc, PW, counts){
+    var CL = PW.CONTENT_LEFT, CR = PW.CONTENT_RIGHT, CW = PW.CONTENT_WIDTH, C = PDF_COLORS;
+    var top = doc.y, markW = 46, markH = 32, tx = CL + markW + 12, rightW = 190;
+    doc.roundRect(CL, top - markH, markW, markH, 4, C.navy);
+    doc.textCenter(CL + markW / 2, top - markH / 2 - 3.6, "AUGS", 10.5, true, C.white);
+
+    doc.text(tx, top - 8, "INSTALLATION STATUS REPORT", 7, true, C.muted);
+    var titleLines = PW.wrapText(state.projectName || "Install Tracker", CW - (markW + 12) - rightW, 16, true, 2);
+    titleLines.forEach(function(line, i){ doc.text(tx, top - 26 - i * 18, line, 16, true, C.navy); });
+    var bottom = top - 26 - (titleLines.length - 1) * 18;
+
+    // job number and address from Job info, when they say something the title doesn't
+    var job = (typeof itc !== "undefined" && itc) ? itc : {};
+    var name = String(state.projectName || "").toLowerCase();
+    var jobNumber = String(job.jobNumber || "").trim(), jobAddress = String(job.jobAddress || "").replace(/\s+/g, " ").trim();
+    var jobLine = [jobNumber && name.indexOf(jobNumber.toLowerCase()) === -1 ? "Job # " + jobNumber : "", jobAddress].filter(Boolean).join("  ·  ");
+    if(jobLine){
+      doc.text(tx, bottom - 13, PW.wrapText(jobLine, CW - (markW + 12), 8.5, false, 1)[0], 8.5, false, C.muted);
+      bottom -= 13;
+    }
+
+    var now = new Date();
+    var when = now.toLocaleDateString(undefined, {year:"numeric", month:"long", day:"numeric"}) + ", " + now.toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"});
+    doc.textRight(CR, top - 8, "Atlantis UGS", 9, true, C.text);
+    doc.textRight(CR, top - 20, when, 8, false, C.muted);
+    doc.textRight(CR, top - 31, counts, 8, false, C.muted);
+
+    doc.y = Math.min(bottom, top - markH) - 9;
+    doc.rect(CL, doc.y - 1.2, CW, 1.2, C.navy);
+    doc.y -= 13;
+  }
+
+  // Progress summary under the title - mirrors the on-screen summary card.
   function drawPdfDashboard(doc, PW, overall, cable){
-    var CL = PW.CONTENT_LEFT, CW = PW.CONTENT_WIDTH;
+    var CL = PW.CONTENT_LEFT, CW = PW.CONTENT_WIDTH, C = PDF_COLORS;
     var hasHrs = overall.hrsTotal > 0;
     var top = doc.y, h = hasHrs ? 88 : 70;   // one more line when there are labor hours to show
-    var border = [0xDD/255,0xD4/255,0xBD/255];
-    doc.rect(CL, top - h, CW, h, border);
-    doc.rect(CL + 0.8, top - h + 0.8, CW - 1.6, h - 1.6, PDF_COLORS.white);
+    doc.roundRect(CL, top - h, CW, h, 5, C.border);
+    doc.roundRect(CL + 0.8, top - h + 0.8, CW - 1.6, h - 1.6, 4.2, C.white);
 
-    // Big percentage
-    var pctText = overall.pct + "%";
-    var pctW = PW.textWidth(pctText, 28, true);
-    var leftW = 104;
-    doc.text(CL + (leftW - pctW) / 2, top - 38, pctText, 28, true, PDF_COLORS.navy);
-    var lbl = "INSTALLED";
-    doc.text(CL + (leftW - PW.textWidth(lbl, 7.5, false)) / 2, top - 52, lbl, 7.5, false, PDF_COLORS.muted);
-    doc.rect(CL + leftW, top - h + 10, 0.8, h - 20, border);
+    // the big percentage
+    var leftW = 108;
+    doc.textCenter(CL + leftW / 2, top - 40, overall.pct + "%", 28, true, C.navy);
+    doc.textCenter(CL + leftW / 2, top - 54, "INSTALLED", 7.5, false, C.muted);
+    doc.rect(CL + leftW, top - h + 12, 0.8, h - 24, C.border);
 
-    // Progress bar
-    var bx = CL + leftW + 16, bw = CW - leftW - 32;
-    doc.rect(bx, top - 19, bw, 7, PDF_COLORS.grayBg);
-    if(overall.pct > 0) doc.rect(bx, top - 19, Math.max(3, bw * Math.min(100, overall.pct) / 100), 7, PDF_COLORS.greenFg);
+    // the bar
+    var bx = CL + leftW + 18, bw = CW - leftW - 36;
+    doc.roundRect(bx, top - 20, bw, 7, 3.5, C.grayBg);
+    if(overall.pct > 0) doc.roundRect(bx, top - 20, Math.max(7, bw * Math.min(100, overall.pct) / 100), 7, 3.5, C.greenFg);
 
-    function stat(x, y, dot, num, label){
-      var nx = x;
-      if(dot){ doc.rect(x, y - 1, 7, 7, dot); nx = x + 11; }
-      doc.text(nx, y, String(num), 10.5, true, PDF_COLORS.text);
-      doc.text(nx + PW.textWidth(String(num), 10.5, true) + 4, y, label, 8.5, false, PDF_COLORS.muted);
+    // each line: what it counts, then the numbers in four even columns
+    var capW = 74, colW = (bw - capW) / 4;
+    function caption(y, text){ doc.text(bx, y + 0.6, text, 6.8, true, C.muted); }
+    function stat(i, y, dot, num, label){
+      var x = bx + capW + i * colW;
+      if(dot){ doc.roundRect(x, y - 0.6, 6.5, 6.5, 1.6, dot); x += 10.5; }
+      doc.text(x, y, String(num), 10.5, true, C.text);
+      doc.text(x + PW.textWidth(String(num), 10.5, true) + 4, y, label, 8.5, false, C.muted);
     }
-    // Row 1: equipment status
-    var row1 = [
-      [PDF_COLORS.greenFg, overall.installed, "installed"],
-      [PDF_COLORS.goldFg, overall.inProgress, "in progress"],
-      [PDF_COLORS.grayFg, overall.notStarted, "not started"]
-    ];
-    if(overall.outOfScope) row1.push([PDF_COLORS.grayBg, overall.outOfScope, "out of scope"]);
-    var colW = bw / 4;
-    row1.forEach(function(r, i){ stat(bx + i * colW, top - 37, r[0], r[1], r[2]); });
-    // Row 2: cable checks by room
-    // (four across, so the labels are kept short: these are all counts of rooms)
-    var cw4 = bw / 4;
-    [[cable.pulled, "cable pulled", cable.pulledOf], [cable.terminated, "terminated", cable.terminatedOf], [cable.tested, "cable tested", cable.testedOf], [cable.power, "power tested", cable.powerOf]].forEach(function(r, i){
-      stat(bx + i * cw4, top - 57, null, r[0] + " / " + r[2], r[1]);
+    var y1 = top - 38, y2 = top - 56, y3 = top - 74;
+    caption(y1, "EQUIPMENT");
+    var row1 = [[C.greenFg, overall.installed, "installed"], [C.goldFg, overall.inProgress, "in progress"], [C.grayFg, overall.notStarted, "not started"]];
+    if(overall.outOfScope) row1.push([C.border, overall.outOfScope, "out of scope"]);
+    row1.forEach(function(r, i){ stat(i, y1, r[0], r[1], r[2]); });
+    caption(y2, "CABLE, BY ROOM");
+    [[cable.pulled, "pulled", cable.pulledOf], [cable.terminated, "terminated", cable.terminatedOf], [cable.tested, "tested", cable.testedOf], [cable.power, "power tested", cable.powerOf]].forEach(function(r, i){
+      stat(i, y2, null, r[0] + " / " + r[2], r[1]);
     });
-    // Row 3: labor hours used vs sold
-    if(hasHrs) stat(bx, top - 75, PDF_COLORS.greenFg, hrsLabel(overall.hrsInstalled, overall.hrsTotal), "labor hrs installed");
+    // labor hours used vs sold
+    if(hasHrs){
+      caption(y3, "LABOR HOURS");
+      stat(0, y3, null, hrsLabel(overall.hrsInstalled, overall.hrsTotal), "installed");
+    }
 
-    doc.y = top - h - 10;
+    doc.y = top - h - 12;
   }
 
   function buildSchedulePdfPages(){
     var PW = window.PdfWriter;
     var doc = PW.createDoc();
-    var CL = PW.CONTENT_LEFT, CW = PW.CONTENT_WIDTH;
-
-    var COLS = [
-      { label:"#", w:26 },
-      { label:"Mfr / Model", w:150 },
-      { label:"Description", w:210 },
-      { label:"Qty", w:30 },
-      { label:"Status", w:76 }
-    ];
-    var fixedW = COLS.reduce(function(s,c){ return s + c.w; }, 0);
-    COLS.push({ label:"Notes", w: CW - fixedW });
-    var colX = [];
-    var cx = CL;
-    COLS.forEach(function(c){ colX.push(cx); cx += c.w; });
-
-    function drawColHeader(){
-      doc.rect(CL, doc.y - 16, CW, 16, PDF_COLORS.headerBg);
-      COLS.forEach(function(c, i){ doc.text(colX[i]+3, doc.y-12, c.label, 8, true, PDF_COLORS.text); });
-      doc.y -= 18;
-    }
+    var CL = PW.CONTENT_LEFT, CR = PW.CONTENT_RIGHT, CW = PW.CONTENT_WIDTH, C = PDF_COLORS;
 
     var allItems = state.order.map(function(id){ return state.items[id]; }).filter(Boolean);
     var floors = groupByFloor();
     var allRooms = [];
     floors.forEach(function(f){ allRooms = allRooms.concat(f.rooms); });
     var overall = computeStats(allItems, allRooms);
-    var totalRooms = allRooms.length;
-    var overallLine = "Atlantis UGS - generated " + new Date().toLocaleString() + " - " +
-      floors.length + " floors, " + totalRooms + " rooms, " + allItems.length + " line items";
 
-    doc.text(CL, doc.y - 14, "Install Tracker - " + state.projectName, 15, true, PDF_COLORS.navy);
-    doc.y -= 20;
-    doc.text(CL, doc.y - 10, overallLine, 9, false, PDF_COLORS.muted);
-    doc.y -= 18;
+    var clean = function(v){ return String(v == null ? "" : v).replace(/\s+/g, " ").trim(); };
+    var plural = function(n, word){ return n + " " + word + (n === 1 ? "" : "s"); };
+    var itemName = function(it){ return [clean(it.mfr), clean(it.model)].filter(Boolean).join(" · "); };
+    var roomTitle = function(r){ return roomName(r.roomNumber) + (clean(r.roomType) ? "  –  " + clean(r.roomType) : ""); };
+    var oneLine = function(text, width, size, bold){ return PW.wrapText(text, width, size, bold, 1)[0]; };
+    var cableNote = function(r, check){ return clean(ensureCable(r.key)[check.key + "Notes"]); };
+
+    // ---- the columns this report needs ----
+    // A column nothing would be printed in is left out, and the room it would
+    // have taken goes to the text: a schedule with no descriptions gets one
+    // wide Item column instead of a narrow one next to an empty one, and Notes
+    // is only there when something has a note.
+    var hasName = allItems.some(function(it){ return itemName(it); });
+    var hasDesc = allItems.some(function(it){ return clean(it.description); });
+    var hasNotes = allItems.some(function(it){ return clean(it.notes); }) ||
+      allRooms.some(function(r){ return CABLE_CHECKS.some(function(check){ return cableNote(r, check); }); });
+    var SIZE = 8, NOTE_SIZE = 7.5, LINE = 10, GAP = 12;
+    var W_NUM = 24, W_QTY = 36, W_STATUS = PDF_PILL_W + 14, W_NOTES = hasNotes ? 176 : 0;
+    var flexW = CW - W_NUM - W_QTY - W_STATUS - W_NOTES;
+    var nameW = flexW, descW = 0;
+    if(hasDesc && hasName){
+      // Wide enough for every name to sit on one line when that leaves the
+      // description plenty of room; otherwise wide enough for nine names in
+      // ten, so one very long name doesn't squeeze every description.
+      var nameWidths = allItems.map(function(it){ return PW.textWidth(itemName(it), SIZE, true); }).sort(function(a, b){ return a - b; });
+      var widest = nameWidths[nameWidths.length - 1] || 0, most = flexW * 0.42;
+      var typical = widest + GAP + 2 <= most ? widest : (nameWidths[Math.floor((nameWidths.length - 1) * 0.9)] || 0);
+      nameW = Math.round(Math.max(110, Math.min(typical + GAP + 2, most)));
+      descW = flexW - nameW;
+    } else if(hasDesc){
+      nameW = 0; descW = flexW;
+    }
+    // names are bold when a description sits beside them; a schedule that is only names reads better plain
+    var nameBold = descW > 0;
+    var X = { num: CL, name: CL + W_NUM };
+    X.desc = X.name + nameW; X.qty = X.desc + descW; X.status = X.qty + W_QTY; X.notes = X.status + W_STATUS;
+
+    function rowLayout(it){
+      var name = itemName(it), desc = clean(it.description), notes = clean(it.notes);
+      var L = { name: [], desc: [], notes: [] };
+      if(nameW && name){
+        // nothing beside it on this line: the name may run on into the description's column
+        var room = (!desc ? nameW + descW : nameW) - GAP;
+        L.name = PW.wrapText(name, room, SIZE, nameBold, 3);
+      }
+      if(descW && desc) L.desc = PW.wrapText(desc, descW - GAP, SIZE, false, 6);
+      if(W_NOTES && notes) L.notes = PW.wrapText(notes, W_NOTES - 4, NOTE_SIZE, false, 40);
+      L.h = Math.max(L.name.length, L.desc.length, L.notes.length, 1) * LINE + 6;
+      return L;
+    }
+
+    // ---- what starts every page ----
+    var here = { floor: null, room: null };   // where the list is, for the "continued" line
+    var pageTopY = null;                      // doc.y just under a page's headings: nothing above to space away from
+    function drawColHeader(){
+      var y = doc.y, ty = y - 10.2;
+      doc.rect(CL, y - 15, CW, 15, C.headerBg);
+      doc.text(X.num + 4, ty, "#", 7, true, C.muted);
+      if(nameW) doc.text(X.name, ty, descW ? "MFR / MODEL" : "ITEM", 7, true, C.muted);
+      if(descW) doc.text(X.desc, ty, "DESCRIPTION", 7, true, C.muted);
+      doc.textRight(X.qty + W_QTY - GAP, ty, "QTY", 7, true, C.muted);
+      doc.text(X.status, ty, "STATUS", 7, true, C.muted);
+      if(W_NOTES) doc.text(X.notes, ty, "NOTES", 7, true, C.muted);
+      doc.y = y - 15;
+    }
+    function startPage(){
+      drawColHeader();
+      if(here.room){
+        // a room that runs over the page says so, instead of lines appearing under no heading
+        var label = floorName(here.floor.floor) + "  ·  " + roomTitle(here.room) + "  (continued)";
+        doc.rect(CL, doc.y - 15, CW, 15, C.tan);
+        doc.text(CL + 6, doc.y - 10.4, oneLine(label, CW - 12, 8, true), 8, true, C.muted);
+        doc.y -= 15;
+      }
+      pageTopY = doc.y;
+    }
+    function gap(points){ if(doc.y !== pageTopY) doc.y -= points; }
+
+    // ---- first page ----
+    drawPdfTitle(doc, PW, plural(floors.length, "floor") + "  ·  " + plural(allRooms.length, "room") + "  ·  " + plural(allItems.length, "line item"));
     drawPdfDashboard(doc, PW, overall, computeCableTotals());
-    drawColHeader();
+    startPage();
 
-    var rowH = 12;
+    var FLOOR_H = 19, ROOM_H = 16, STRIP_H = 19;
+    // What a room needs under its heading before it may start on a page: its
+    // first three lines (all of them, and the cable line, when it is that
+    // short). Fewer than that would leave a heading with a line or two at the
+    // foot of a page and the rest over the leaf.
+    function roomLead(layouts){
+      var h = ROOM_H;
+      for(var k = 0; k < Math.min(3, layouts.length); k++) h += layouts[k].h;
+      return layouts.length <= 3 ? h + STRIP_H : h;
+    }
 
     floors.forEach(function(f){
-      doc.ensureSpace(20, drawColHeader);
-      doc.rect(CL, doc.y - 16, CW, 16, PDF_COLORS.navy);
-      doc.text(CL+4, doc.y-12, floorName(f.floor), 9, true, PDF_COLORS.white);
-      doc.y -= 18;
+      var floorItems = [];
+      f.rooms.forEach(function(r){ floorItems = floorItems.concat(r.items); });
+      var fStats = computeStats(floorItems, f.rooms);
+      var firstRoomH = f.rooms.length ? roomLead(f.rooms[0].items.map(rowLayout)) : 0;
+
+      here.floor = f; here.room = null;
+      // a floor heading is never left alone at the foot of a page
+      doc.ensureSpace(8 + FLOOR_H + 4 + firstRoomH, startPage);
+      gap(8);
+      doc.roundRect(CL, doc.y - FLOOR_H, CW, FLOOR_H, 3, C.navy);
+      doc.text(CL + 8, doc.y - 13, oneLine(floorName(f.floor), CW - 260, 10, true), 10, true, C.white);
+      doc.textRight(CR - 8, doc.y - 12.6, plural(f.rooms.length, "room") + "  ·  " + fStats.installed + " of " + fStats.scoped + " installed", 8, false, C.onNavy);
+      doc.y -= FLOOR_H + 4;
+      pageTopY = doc.y;   // the first room sits right under its floor
 
       f.rooms.forEach(function(r){
-        doc.ensureSpace(16, drawColHeader);
-        doc.rect(CL, doc.y - 14, CW, 14, PDF_COLORS.tan);
-        doc.text(CL+4, doc.y-10, roomName(r.roomNumber) + (r.roomType ? " - " + r.roomType : ""), 8.5, true, PDF_COLORS.text);
-        doc.y -= 16;
+        var rStats = computeStats(r.items, [r]);
+        var layouts = r.items.map(rowLayout);
 
-        r.items.forEach(function(it){
-          var mm = [it.mfr, it.model].filter(Boolean).join(" · ");
-          var mmLines = PW.wrapText(mm, COLS[1].w-4, 7.5, true, 2);
-          var descLines = PW.wrapText(it.description || "", COLS[2].w-4, 7.5, false, 4);
-          var noteLines = it.notes ? PW.wrapText(String(it.notes).replace(/\s+/g, " ").trim(), COLS[5].w-6, 7.5, false, 60) : [];
-          var nLines = Math.max(mmLines.length, descLines.length, noteLines.length, 1);
-          var h = Math.max(rowH, nLines * 9 + 3);
-          doc.ensureSpace(h, drawColHeader);
-
-          var st = pdfStatusStyle(it);
-          doc.rect(colX[4], doc.y - 10, COLS[4].w-4, 10, st.bg);
-
-          doc.text(colX[0]+3, doc.y - 9, String(it.itemIndexInRoom), 7.5, false, PDF_COLORS.text);
-          mmLines.forEach(function(line, i){ doc.text(colX[1]+3, doc.y - 9 - i*9, line, 7.5, true, PDF_COLORS.text); });
-          descLines.forEach(function(line, i){ doc.text(colX[2]+3, doc.y - 9 - i*9, line, 7.5, false, PDF_COLORS.muted); });
-          doc.text(colX[3]+3, doc.y - 9, String(it.qty != null ? it.qty : 1), 7.5, false, PDF_COLORS.text);
-          doc.text(colX[4]+3, doc.y - 9, st.label, 7.5, false, st.fg);
-          noteLines.forEach(function(line, i){ doc.text(colX[5]+3, doc.y - 9 - i*9, line, 7.5, false, PDF_COLORS.muted); });
-          doc.y -= h;
-        });
-
+        // The room's cable checks go on one line of their own under its equipment.
+        // (They used to be listed as four more numbered lines, like equipment.)
         var cable = ensureCable(r.key);
-        CABLE_CHECKS.forEach(function(check, i){
-          // a cable check's own note prints too, wrapped the same way
-          var cNote = String(cable[check.key + "Notes"] || "").replace(/\s+/g, " ").trim();
-          var cNoteLines = cNote ? PW.wrapText(cNote, COLS[5].w-6, 7.5, false, 60) : [];
-          var ch = Math.max(rowH, cNoteLines.length * 9 + 3);
-          doc.ensureSpace(ch, drawColHeader);
-          var val = cableShownValue(cable, check.key);
-          var cs = pdfCableStyle(check.key, val);
-          doc.rect(colX[4], doc.y - 10, COLS[4].w-4, 10, cs.bg);
-          doc.text(colX[0]+3, doc.y - 9, String(r.items.length + i + 1), 7.5, false, PDF_COLORS.text);
-          doc.text(colX[1]+3, doc.y - 9, check.label, 7.5, true, PDF_COLORS.text);
-          doc.text(colX[4]+3, doc.y - 9, cs.label, 7.5, false, cs.fg);
-          cNoteLines.forEach(function(line, j){ doc.text(colX[5]+3, doc.y - 9 - j*9, line, 7.5, false, PDF_COLORS.muted); });
-          doc.y -= ch;
+        var cableNotes = [];
+        CABLE_CHECKS.forEach(function(check){
+          var note = cableNote(r, check);
+          if(note) cableNotes = cableNotes.concat(PW.wrapText(pdfCableLabel(check) + ": " + note, CW - 62, NOTE_SIZE, false, 6));
         });
+        var stripH = STRIP_H + (cableNotes.length ? cableNotes.length * 9 + 3 : 0);
+
+        // ...nor a room heading with only a line or two under it
+        here.room = null;
+        doc.ensureSpace(5 + roomLead(layouts), startPage);
+        gap(5);
+        doc.rect(CL, doc.y - ROOM_H, CW, ROOM_H, C.tan);
+        doc.text(CL + 6, doc.y - 11, oneLine(roomTitle(r), CW - 130, 8.5, true), 8.5, true, C.text);
+        doc.textRight(CR - 6, doc.y - 10.8, rStats.installed + " of " + rStats.scoped + " installed", 7.5, false, C.muted);
+        doc.y -= ROOM_H;
+        here.room = r;
+
+        r.items.forEach(function(it, n){
+          var L = layouts[n];
+          // the last line takes the cable line with it, so that never starts a page by itself
+          doc.ensureSpace(L.h + (n === layouts.length - 1 ? stripH : 0), startPage);
+          var y = doc.y, base = y - 10;
+          var ink = it.inScope ? C.text : C.faint;
+          doc.text(X.num + 4, base, String(it.itemIndexInRoom), 7.5, false, C.muted);
+          L.name.forEach(function(line, i){ doc.text(X.name, base - i * LINE, line, SIZE, nameBold, ink); });
+          L.desc.forEach(function(line, i){ doc.text(X.desc, base - i * LINE, line, SIZE, false, it.inScope ? C.ink2 : C.faint); });
+          doc.textRight(X.qty + W_QTY - GAP, base, String(it.qty != null ? it.qty : 1), SIZE, false, ink);
+          drawPdfPill(doc, X.status, y - 7.1, pdfStatusStyle(it));
+          L.notes.forEach(function(line, i){ doc.text(X.notes, base - i * LINE, line, NOTE_SIZE, false, C.muted); });
+          doc.rect(CL, y - L.h, CW, 0.5, C.rule);
+          doc.y = y - L.h;
+        });
+
+        doc.ensureSpace(stripH, startPage);
+        var sy = doc.y, labelX = CL + 56, slot = (CW - 62) / CABLE_CHECKS.length;
+        doc.rect(CL, sy - stripH, CW, stripH, C.strip);
+        doc.text(CL + 6, sy - 12, "CABLE", 6.8, true, C.muted);
+        CABLE_CHECKS.forEach(function(check, i){
+          var label = pdfCableLabel(check), gx = labelX + i * slot;
+          doc.text(gx, sy - 12.2, label, 7.5, false, C.ink2);
+          drawPdfPill(doc, gx + PW.textWidth(label, 7.5, false) + 7, sy - 9.5, pdfCableStyle(check.key, cableShownValue(cable, check.key)));
+        });
+        cableNotes.forEach(function(line, i){ doc.text(labelX, sy - STRIP_H - 6 - i * 9, line, NOTE_SIZE, false, C.muted); });
+        doc.rect(CL, sy - stripH, CW, 0.5, C.rule);
+        doc.y = sy - stripH;
+        here.room = null;
       });
     });
 
-    return doc.finish();
+    return doc.finish("Install Tracker  ·  " + (state.projectName || ""));
   }
 
   function exportPdf(){
     if(!window.PdfWriter){ downloadPdf(); return; }
     try{
       var pages = buildSchedulePdfPages();
-      var bytes = window.PdfWriter.buildBytes(pages);
+      var bytes = window.PdfWriter.buildBytes(pages, "Install Tracker - " + (state.projectName || ""));
       var filename = downloadName("pdf");
       downloadFile(filename, bytes, "application/pdf");
     } catch(e){
