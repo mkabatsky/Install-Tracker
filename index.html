@@ -808,7 +808,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 24 - October 8, 2026">Build 24</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 25 - October 8, 2026">Build 25</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -924,7 +924,7 @@
     </div>
     <p class="it-modal-sub">Everyone signed in sees the same projects, and changes appear on every device within a second or two.</p>
     <div class="it-item-find">
-      <input id="itFindInput" type="text" placeholder="Find in any project: room #, room type, make, model, description" autocomplete="off">
+      <input id="itFindInput" type="text" placeholder="Find a project by name or job #, or an item in any project (room #, make, model, description)" autocomplete="off">
       <button class="it-primary" id="itFindBtn" type="button">Find</button>
     </div>
     <div id="itFindResults" class="it-find-results"></div>
@@ -933,7 +933,7 @@
       <button class="it-primary" id="itNewBtn" type="button">Create project</button>
     </div>
     <div class="it-project-list-head">
-      <input id="itProjectFilter" type="text" placeholder="Look up a project by name…" autocomplete="off">
+      <input id="itProjectFilter" type="text" placeholder="Narrow this list by name, job # or address…" autocomplete="off">
       <button class="tool-btn" id="itShowArchivedBtn" type="button">Show archived projects</button>
     </div>
     <div class="it-project-list" id="itProjectList"></div>
@@ -5197,7 +5197,14 @@
     var filterEl = itEl("itProjectFilter");
     var term = (filterEl && filterEl.value || "").trim().toLowerCase();
     if (!term) return projects;
-    return projects.filter(function(p){ return (p.name || "").toLowerCase().indexOf(term) !== -1; });
+    return projects.filter(function(p){ return itProjectMatches(p, term); });
+  }
+  // a project matches on its name, job number or address (capitals don't matter)
+  function itProjectMatches(p, termLower){
+    var m = (p && p.meta) || {};
+    return [p && p.name, m.projectName, m.jobNumber, m.jobAddress].some(function(v){
+      return String(v == null ? "" : v).toLowerCase().indexOf(termLower) !== -1;
+    });
   }
   function itRenderProjectList(){
     var list = itEl("itProjectList");
@@ -5322,33 +5329,77 @@
     return true;
   }
 
-  // ----- find an item in ANY project -----
+  // ----- find a PROJECT (by name, job number or address), or an item in ANY project -----
+  // It used to look only inside projects (room #, make, model, description),
+  // so typing a project's name here found nothing.
   function itCrossProjectSearch(){
     var term = itEl("itFindInput").value.trim();
     var safe = term.replace(/[(),]/g, " ").trim();
     itEl("itFindResults").innerHTML = "";
     if (!safe){ itProjectMsg("Type something to search for.", true); return; }
     itProjectMsg("Searching every project...");
+    var termLower = term.toLowerCase();
+    // 1. projects - archived ones too, so one that was archived can still be found
+    var projectsP = Promise.resolve().then(function(){
+      return itc.sb.from("it_projects").select("id,name,meta,updated_at,archived").eq("deleted", false).order("updated_at", {ascending: false});
+    }).then(function(r){
+      if (r.error) throw r.error;
+      return (r.data || []).filter(function(p){ return itProjectMatches(p, termLower); });
+    }).catch(function(){
+      // offline: at least the projects already listed below
+      return itProjectsCache.filter(function(p){ return itProjectMatches(p, termLower); });
+    });
+    // 2. items inside projects
     var pattern = "%" + safe + "%";
     var cols = ["roomNumber", "roomType", "mfr", "model", "description"];
     var orExpr = cols.map(function(c){ return "data->>" + c + ".ilike." + pattern; }).join(",");
-    return itc.sb.from("it_items").select("id,project_id,data,it_projects(id,name,deleted)").eq("deleted", false).or(orExpr).limit(50).then(function(r){
-      if (r.error){ itProjectMsg("Couldn't search: " + r.error.message, true); return; }
-      var rows = (r.data || []).filter(function(x){ return x.it_projects && !x.it_projects.deleted; });
-      itDrawFindResults(rows, term);
-    }).catch(function(e){
-      itProjectMsg(itIsNetworkProblem(e) ? "You're offline — this needs an internet connection." : "Couldn't search: " + (e && e.message ? e.message : e), true);
+    var itemsP = Promise.resolve().then(function(){
+      return itc.sb.from("it_items").select("id,project_id,data,it_projects(id,name,deleted)").eq("deleted", false).or(orExpr).limit(50);
+    }).then(function(r){
+      if (r.error) throw r.error;
+      return {rows: (r.data || []).filter(function(x){ return x.it_projects && !x.it_projects.deleted; })};
+    }).catch(function(e){ return {rows: [], error: e}; });
+    return Promise.all([projectsP, itemsP]).then(function(res){
+      var projects = res[0], items = res[1];
+      itDrawFindResults(items.rows, term, projects);
+      if (items.error && !projects.length){
+        itProjectMsg(itIsNetworkProblem(items.error) ? "You're offline — this needs an internet connection." : "Couldn't search: " + (items.error.message || items.error), true);
+      }
     });
   }
   function itItemLabel(d){
     var bits = [d.mfr, d.model].filter(function(v){ return v && String(v).trim(); }).join(" ");
     return bits || d.description || d.roomType || "Item";
   }
-  function itDrawFindResults(rows, term){
+  function itDrawFindResults(rows, term, projects){
     var box = itEl("itFindResults");
     box.innerHTML = "";
-    if (!rows.length){ itProjectMsg('No items matched "' + term + '".'); return; }
-    itProjectMsg(rows.length + " item" + (rows.length === 1 ? "" : "s") + " found.");
+    projects = projects || [];
+    if (!rows.length && !projects.length){ itProjectMsg('No project or item matched "' + term + '".'); return; }
+    var found = [];
+    if (projects.length) found.push(projects.length + " project" + (projects.length === 1 ? "" : "s"));
+    if (rows.length) found.push(rows.length + " item" + (rows.length === 1 ? "" : "s"));
+    itProjectMsg(found.join(" and ") + " found.");
+    // projects first
+    projects.forEach(function(p){
+      var m = p.meta || {};
+      var row = document.createElement("div");
+      row.className = "it-find-hit";
+      var info = document.createElement("div");
+      info.className = "fh-info";
+      var item = document.createElement("div");
+      item.className = "fh-item";
+      item.textContent = (p.name || m.projectName || "Untitled project") + (p.archived ? " (archived)" : "");
+      var projLine = document.createElement("div");
+      projLine.className = "fh-proj";
+      projLine.textContent = ["Project", m.jobNumber ? "Job # " + m.jobNumber : "", m.jobAddress || "", p.updated_at ? "updated " + itFormatWhen(p.updated_at) : ""].filter(Boolean).join(" · ");
+      info.appendChild(item); info.appendChild(projLine);
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.className = "it-primary tool-btn"; btn.textContent = "Open project";
+      btn.addEventListener("click", function(){ itOpenProject(p); });
+      row.appendChild(info); row.appendChild(btn);
+      box.appendChild(row);
+    });
     rows.forEach(function(hit){
       var row = document.createElement("div");
       row.className = "it-find-hit";
