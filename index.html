@@ -808,7 +808,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 26 - October 8, 2026">Build 26</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 27 - October 8, 2026">Build 27</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -3181,16 +3181,15 @@
     var cableNote = function(r, check){ return clean(ensureCable(r.key)[check.key + "Notes"]); };
 
     // ---- the columns this report needs ----
-    // A column nothing would be printed in is left out, and the room it would
-    // have taken goes to the text: a schedule with no descriptions gets one
-    // wide Item column instead of a narrow one next to an empty one, and Notes
-    // is only there when something has a note.
+    // Make/model or Description is left out when nothing would be printed in
+    // it, and the room it would have taken goes to the text: a schedule with
+    // no descriptions gets one wide Item column instead of a narrow one next
+    // to an empty one. Notes is always there - empty, it is where notes get
+    // written on a printed copy.
     var hasName = allItems.some(function(it){ return itemName(it); });
     var hasDesc = allItems.some(function(it){ return clean(it.description); });
-    var hasNotes = allItems.some(function(it){ return clean(it.notes); }) ||
-      allRooms.some(function(r){ return CABLE_CHECKS.some(function(check){ return cableNote(r, check); }); });
     var SIZE = 8, NOTE_SIZE = 7.5, LINE = 10, GAP = 12;
-    var W_NUM = 24, W_QTY = 36, W_STATUS = PDF_PILL_W + 14, W_NOTES = hasNotes ? 176 : 0;
+    var W_NUM = 24, W_QTY = 36, W_STATUS = PDF_PILL_W + 14, W_NOTES = 176;
     var flexW = CW - W_NUM - W_QTY - W_STATUS - W_NOTES;
     var nameW = flexW, descW = 0;
     if(hasDesc && hasName){
@@ -3219,7 +3218,7 @@
         L.name = PW.wrapText(name, room, SIZE, nameBold, 3);
       }
       if(descW && desc) L.desc = PW.wrapText(desc, descW - GAP, SIZE, false, 6);
-      if(W_NOTES && notes) L.notes = PW.wrapText(notes, W_NOTES - 4, NOTE_SIZE, false, 40);
+      if(notes) L.notes = PW.wrapText(notes, W_NOTES - 4, NOTE_SIZE, false, 40);
       L.h = Math.max(L.name.length, L.desc.length, L.notes.length, 1) * LINE + 6;
       return L;
     }
@@ -3235,7 +3234,7 @@
       if(descW) doc.text(X.desc, ty, "DESCRIPTION", 7, true, C.muted);
       doc.textRight(X.qty + W_QTY - GAP, ty, "QTY", 7, true, C.muted);
       doc.text(X.status, ty, "STATUS", 7, true, C.muted);
-      if(W_NOTES) doc.text(X.notes, ty, "NOTES", 7, true, C.muted);
+      doc.text(X.notes, ty, "NOTES", 7, true, C.muted);
       doc.y = y - 15;
     }
     function startPage(){
