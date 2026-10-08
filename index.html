@@ -278,6 +278,8 @@
     font-family:"IBM Plex Mono"; font-size:11px; font-weight:600;
     background:var(--navy-tint); color:var(--navy); border-radius:5px; padding:1px 6px;
   }
+  .hrs-badge{ background:var(--surface-2); color:var(--text-muted); }
+  .room-hrs-label{ border-top:none; }
   .note-toggle{
     background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:11.5px;
     padding:0; text-decoration:underline; text-underline-offset:2px;
@@ -636,6 +638,9 @@
      project - PC can still browse and switch between projects, same as
      staff */
   body.it-locked-project #itProjectsBtn{display:none !important;}
+  /* PC - one project: everything a PC can do, in the one project it is
+     assigned to. There is nothing to switch to, and a dashboard of one. */
+  body.it-pc-one-project #itProjectsBtn, body.it-pc-one-project #itDashboardBtn{display:none !important;}
 
   /* PC can open the Projects list (to browse/switch) but creating a
      project or deleting one there is still a write action reserved for
@@ -803,7 +808,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 24 - October 8, 2026">Build 24</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -835,6 +840,8 @@
             <span class="cable-count"><b id="cCablePulled">0 / 0</b> rooms cable pulled</span>
             <span class="cable-count"><b id="cCableTerminated">0 / 0</b> rooms cable terminated</span>
             <span class="cable-count"><b id="cCableTested">0 / 0</b> rooms cable tested</span>
+            <span class="cable-count"><b id="cCablePower">0 / 0</b> rooms power tested</span>
+            <span class="cable-count" id="cLaborHrsWrap" hidden><b id="cLaborHrs">0 / 0</b> labor hrs installed</span>
           </div>
         </div>
       </div>
@@ -988,6 +995,7 @@
             <option value="staff">Staff (full access)</option>
             <option value="viewer-locked">Viewer - one project (view/sort/PDF only)</option>
             <option value="viewer-any">PC - all projects</option>
+            <option value="pc-locked">PC - one project</option>
             <option value="dashboard">Dashboard (view-only, no edits)</option>
           </select>
         </label>
@@ -1061,6 +1069,7 @@
       <label class="add-field">Model<input class="bom-in" id="addModel"></label>
       <label class="add-field add-wide">Description<input class="bom-in" id="addDesc"></label>
       <label class="add-field">Qty<input class="bom-in" id="addQty" type="number" min="1" value="1"></label>
+      <label class="add-field">Labor hrs (each)<input class="bom-in" id="addHrs" type="number" min="0" step="0.25" placeholder="optional"></label>
       <p class="add-err" id="addErr" role="alert"></p>
     </div>
     <div class="bom-foot">
@@ -1759,7 +1768,7 @@
 
   var STATUS_ORDER = ["not_started","in_progress","installed"];
 
-  // ---- Cable status: a separate per-room checklist (Cable Pulled? / Terminated? / Tested?) ----
+  // ---- Cable status: a separate per-room checklist (Cable Pulled? / Terminated? / Tested? / Power Test?) ----
   var CABLE_CHECKS = [
     { key:"pulled", label:"Cable Pulled?", options:[
         { value:"not_installed", label:"Not inst." },
@@ -1779,9 +1788,16 @@
         { value:"pass",          label:"Pass" },
         { value:"fail",          label:"Fail" },
         { value:"na",            label:"N/A" }
+      ] },
+    { key:"power", label:"Power Test?", options:[
+        { value:"not_installed", label:"Not done" },
+        { value:"in_progress",   label:"In prog." },
+        { value:"pass",          label:"Pass" },
+        { value:"fail",          label:"Fail" },
+        { value:"na",            label:"N/A" }
       ] }
   ];
-  var CABLE_DONE_VALUES = { pulled:"installed", terminated:"terminated", tested:"pass" };
+  var CABLE_DONE_VALUES = { pulled:"installed", terminated:"terminated", power:"pass", tested:"pass" };
 
   function cableCheckByKey(key){
     for(var i=0;i<CABLE_CHECKS.length;i++){ if(CABLE_CHECKS[i].key === key) return CABLE_CHECKS[i]; }
@@ -1805,7 +1821,7 @@
   var state = {
     items: {},
     order: [],
-    cable: {},          // roomKey -> { pulled, terminated, tested, pulledNotes, terminatedNotes, testedNotes }
+    cable: {},          // roomKey -> { pulled, terminated, power, tested, pulledNotes, terminatedNotes, powerNotes, testedNotes }
     filter: "all",
     search: "",
     expandedFloor: {},
@@ -1818,11 +1834,57 @@
     return Object.assign({ inScope:true, status:"not_started", notes:"" }, raw);
   }
 
+  // A room's cable record with every check filled in. Used for a brand-new
+  // room, and for a record coming from the server. A record already on this
+  // device that predates a check (Power Test was added later) is deliberately
+  // NOT filled in here: the missing check simply reads as "not done" (see
+  // cableValueOf), so it can never be mistaken for a change made on this
+  // device and sent back over what someone else has already set.
+  function cableDefaults(raw){
+    var out = {};
+    CABLE_CHECKS.forEach(function(c){ out[c.key] = "not_installed"; });
+    CABLE_CHECKS.forEach(function(c){ out[c.key + "Notes"] = ""; });
+    return Object.assign(out, raw);
+  }
+  function cableValueOf(cable, checkKey){
+    return (cable && cable[checkKey]) || "not_installed";
+  }
   function ensureCable(roomKey){
-    if(!state.cable[roomKey]){
-      state.cable[roomKey] = { pulled:"not_installed", terminated:"not_installed", tested:"not_installed", pulledNotes:"", terminatedNotes:"", testedNotes:"" };
-    }
+    if(!state.cable[roomKey]) state.cable[roomKey] = cableDefaults();
     return state.cable[roomKey];
+  }
+
+  // ---- Labor hours ----
+  // An item can carry labor hours per unit (from the BOM, an Excel sheet, or
+  // typed in). A line's hours = hours each x Qty. "Sold" is the total over
+  // everything in scope; "used" is the part whose items are Installed.
+  // Who sees labor hours: staff, PC (all projects or one) and the dashboard
+  // account. A one-project Viewer does not - for that account every hours
+  // figure reads as none, which hides them everywhere they would show (the
+  // summary, floors, rooms, line items and the PDF).
+  function hrsVisible(){
+    var c = document.body.classList;
+    return !(c.contains("it-role-viewer") && c.contains("it-locked-project"));
+  }
+  function itemHrs(it){
+    if(!hrsVisible()) return 0;
+    var each = Number(it && it.laborHrs);
+    if(!(each > 0)) return 0;
+    var qty = it.qty != null ? Number(it.qty) : 1;
+    if(!(qty >= 0)) qty = 1;
+    return each * qty;
+  }
+  function fmtHrs(n){ return String(Math.round((Number(n) || 0) * 100) / 100); }
+  function hrsLabel(done, total){ return fmtHrs(done) + " / " + fmtHrs(total); }
+  function sumHrs(items){
+    var total = 0, installed = 0;
+    items.forEach(function(it){
+      if(!it || !it.inScope) return;
+      var h = itemHrs(it);
+      total += h;
+      if(it.status === "installed") installed += h;
+    });
+    return { total: total, installed: installed };
   }
 
   function bootData(){
@@ -1867,6 +1929,8 @@
         merged.inScope = old.inScope;
         merged.status = old.status;
         merged.notes = old.notes;
+        // a BOM re-imported without its labor-hours column keeps the hours already here
+        if(merged.laborHrs == null && old.laborHrs != null) merged.laborHrs = old.laborHrs;
         if(old.updatedAt) merged.updatedAt = old.updatedAt;
       }
       state.items[it.id] = merged;
@@ -1876,7 +1940,8 @@
     if(projectName) setProjectName(projectName);
   }
 
-  var ITEM_BASE_FIELDS = ["id","floor","roomNumber","roomType","roomKey","roomIndexOnFloor","itemIndexInRoom","qty","mfr","model","description"];
+  // laborHrs (hours per unit) goes last: an item without it then saves exactly as it did before the field existed
+  var ITEM_BASE_FIELDS = ["id","floor","roomNumber","roomType","roomKey","roomIndexOnFloor","itemIndexInRoom","qty","mfr","model","description","laborHrs"];
   function baseItems(){
     return state.order.map(function(id){
       var it = state.items[id], out = {};
@@ -2017,6 +2082,7 @@
         roomIndexOnFloor: maxIdx + 1, itemIndexInRoom: i + 1,
         qty: src.qty, mfr: src.mfr, model: src.model, description: src.description, inScope: src.inScope !== false
       });
+      if(src.laborHrs != null) state.items[id].laborHrs = src.laborHrs;
       state.order.push(id);
     });
     var srcCable = state.cable[r.key] || {}, cable = ensureCable(newKey);
@@ -2086,7 +2152,7 @@
   }
   // what exports show for a check: its value, or "out_of_scope"
   function cableShownValue(cable, checkKey){
-    return cable && cable[checkKey + "InScope"] === false ? "out_of_scope" : cable[checkKey];
+    return cable && cable[checkKey + "InScope"] === false ? "out_of_scope" : cableValueOf(cable, checkKey);
   }
   function isCableDone(checkKey, value){
     return value === CABLE_DONE_VALUES[checkKey] || value === "na";
@@ -2112,7 +2178,7 @@
     if(q && !matchesSearchRoom(r, q)) return [];
     var cable = ensureCable(r.key);
     return CABLE_CHECKS.filter(function(check){
-      return cableRowMatchesFilter(check.key, cable[check.key], filter, cable[check.key + "InScope"] !== false);
+      return cableRowMatchesFilter(check.key, cableValueOf(cable, check.key), filter, cable[check.key + "InScope"] !== false);
     });
   }
 
@@ -2169,7 +2235,9 @@
       pct = Math.round(equipPct);
     }
 
-    return { total: items.length, scoped: scoped.length, installed:installed, inProgress:inProgress, notStarted:notStarted, outOfScope:outOfScope, pct:pct, equipPct:equipPct, cablePct:cablePct };
+    var hrs = sumHrs(items);
+    return { total: items.length, scoped: scoped.length, installed:installed, inProgress:inProgress, notStarted:notStarted, outOfScope:outOfScope, pct:pct, equipPct:equipPct, cablePct:cablePct,
+      hrsTotal: hrs.total, hrsInstalled: hrs.installed };
   }
 
   function render(){
@@ -2187,7 +2255,11 @@
     var cableTotals = computeCableTotals();
     document.getElementById("cCablePulled").textContent = cableTotals.pulled + " / " + cableTotals.pulledOf;
     document.getElementById("cCableTerminated").textContent = cableTotals.terminated + " / " + cableTotals.terminatedOf;
+    document.getElementById("cCablePower").textContent = cableTotals.power + " / " + cableTotals.powerOf;
     document.getElementById("cCableTested").textContent = cableTotals.tested + " / " + cableTotals.testedOf;
+    // labor hours used (installed) vs sold - only shown when the schedule has hours
+    document.getElementById("cLaborHrs").textContent = hrsLabel(overall.hrsInstalled, overall.hrsTotal);
+    document.getElementById("cLaborHrsWrap").hidden = !(overall.hrsTotal > 0);
 
     var totalRooms = 0;
     floors.forEach(function(f){ totalRooms += f.rooms.length; });
@@ -2228,7 +2300,8 @@
       head.innerHTML =
         '<svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg>' +
         '<div class="floor-title"><h2>' + escapeHtml(floorName(f.floor)) + ' <button type="button" class="note-toggle floor-rename" data-action="rename-floor" title="Change this floor\'s name">rename</button></h2>' +
-        '<div class="floor-meta">' + f.rooms.length + ' rooms · ' + fStats.scoped + ' in scope' + (fStats.outOfScope ? ' · ' + fStats.outOfScope + ' out of scope' : '') + '</div></div>' +
+        '<div class="floor-meta">' + f.rooms.length + ' rooms · ' + fStats.scoped + ' in scope' + (fStats.outOfScope ? ' · ' + fStats.outOfScope + ' out of scope' : '') +
+          (fStats.hrsTotal > 0 ? ' · ' + hrsLabel(fStats.hrsInstalled, fStats.hrsTotal) + ' labor hrs' : '') + '</div></div>' +
         '<div class="floor-progress"><div class="track"><div class="fill" style="width:' + fStats.pct + '%"></div></div>' +
         '<span class="frac">' + fStats.installed + '/' + fStats.scoped + '</span></div>' +
         '<div class="floor-actions"><button type="button" data-action="complete-floor">' + (floorAllInstalled ? "Mark floor not installed" : "Mark floor installed") + '</button></div>';
@@ -2306,6 +2379,12 @@
 
     var itemsWrap = document.createElement("div");
     itemsWrap.className = "room-items";
+    if(rStats.hrsTotal > 0 && visibleItems.length){
+      var hrsLine = document.createElement("div");
+      hrsLine.className = "cable-section-label room-hrs-label";
+      hrsLine.textContent = "Labor hrs · " + hrsLabel(rStats.hrsInstalled, rStats.hrsTotal) + " installed";
+      itemsWrap.appendChild(hrsLine);
+    }
     visibleItems.forEach(function(it){ itemsWrap.appendChild(renderItem(it)); });
 
     if(visibleCableChecks.length > 0){
@@ -2327,7 +2406,7 @@
 
   function renderCableRow(r, check, idxNumber){
     var cable = ensureCable(r.key);
-    var value = cable[check.key];
+    var value = cableValueOf(cable, check.key);
     var notesKey = check.key + "Notes";
     var notes = cable[notesKey] || "";
 
@@ -2419,16 +2498,18 @@
     var liveRooms = {};
     state.order.forEach(function(id){ var it = state.items[id]; if(it) liveRooms[it.roomKey] = true; });
     var keys = Object.keys(state.cable).filter(function(k){ return liveRooms[k]; });
-    var pulled = 0, terminated = 0, tested = 0;
-    var pulledOf = 0, terminatedOf = 0, testedOf = 0;
+    var pulled = 0, terminated = 0, power = 0, tested = 0;
+    var pulledOf = 0, terminatedOf = 0, powerOf = 0, testedOf = 0;
     keys.forEach(function(k){
       var c = state.cable[k];
       if(cableCheckApplies(c, "pulled")){ pulledOf++; if(c.pulled === "installed") pulled++; }
       if(cableCheckApplies(c, "terminated")){ terminatedOf++; if(c.terminated === "terminated") terminated++; }
+      if(cableCheckApplies(c, "power")){ powerOf++; if(c.power === "pass") power++; }
       if(cableCheckApplies(c, "tested")){ testedOf++; if(c.tested === "pass") tested++; }
     });
-    // pulledOf/terminatedOf/testedOf = rooms each check applies to (N/A and out of scope left out)
-    return { totalRooms: keys.length, pulled: pulled, terminated: terminated, tested: tested, pulledOf: pulledOf, terminatedOf: terminatedOf, testedOf: testedOf };
+    // pulledOf/terminatedOf/powerOf/testedOf = rooms each check applies to (N/A and out of scope left out)
+    return { totalRooms: keys.length, pulled: pulled, terminated: terminated, power: power, tested: tested,
+      pulledOf: pulledOf, terminatedOf: terminatedOf, powerOf: powerOf, testedOf: testedOf };
   }
 
   function renderItem(it){
@@ -2446,6 +2527,7 @@
     var mm = [it.mfr, it.model].filter(Boolean).join(" · ");
     var subParts = [];
     subParts.push('<span class="qty-badge">QTY ' + escapeHtml(it.qty != null ? it.qty : 1) + '</span>');
+    if(itemHrs(it) > 0) subParts.push('<span class="qty-badge hrs-badge" title="Labor hours for this line: ' + escapeHtml(fmtHrs(it.laborHrs)) + ' each × Qty">' + escapeHtml(fmtHrs(itemHrs(it))) + ' HRS</span>');
     subParts.push('<button type="button" class="note-toggle' + (it.notes ? ' has-note' : '') + '" data-action="toggle-note">' + (it.notes ? "note" : "+ note") + '</button>');
     subParts.push('<button type="button" class="note-toggle" data-action="edit-item" title="Change this item\'s make, model, description or quantity, or remove it">edit</button>');
     main.innerHTML =
@@ -2564,7 +2646,7 @@
   }
 
   function toCsv(){
-    var rows = [["Floor","Room","Room Type","Item #","Qty","Manufacturer","Model","Description","In Scope","Status","Notes"]];
+    var rows = [["Floor","Room","Room Type","Item #","Qty","Manufacturer","Model","Description","In Scope","Status","Notes","Labor Hrs"]];
     groupByFloor().forEach(function(f){
       f.rooms.forEach(function(r){
         r.items.forEach(function(it){
@@ -2572,7 +2654,8 @@
             f.floor, r.roomNumber, r.roomType, it.itemIndexInRoom, it.qty, it.mfr, it.model, it.description,
             it.inScope ? "Yes" : "No",
             it.inScope ? STATUS_LABEL[it.status] : "Out of Scope",
-            it.notes || ""
+            it.notes || "",
+            itemHrs(it) > 0 ? fmtHrs(itemHrs(it)) : ""
           ]);
         });
         var cable = ensureCable(r.key);
@@ -2653,6 +2736,13 @@
   }
 
   var EXCEL_COL_WIDTHS = [7, 9, 20, 6, 26, 46, 6, 14, 30];
+  // Labor Hrs goes in column M (J-L are left as a narrow gap), and only when
+  // the schedule has labor hours at all.
+  var EXCEL_HRS_COL = 12;
+  var EXCEL_COL_WIDTHS_HRS = EXCEL_COL_WIDTHS.concat([2, 2, 2, 11]);
+  function scheduleHasHrs(){
+    return state.order.some(function(id){ return itemHrs(state.items[id]) > 0; });
+  }
 
   // Rows 1–7: title + progress dashboard (mirrors the on-screen card and the PDF). Returns merges.
   function buildExcelDashboard(XW, rowsXml){
@@ -2665,8 +2755,11 @@
     function blank(from, to, row, style){ var out = []; for(var i = from; i <= to; i++) out.push(XW.xlsxCell(i, row, "", style, false)); return out; }
 
     rowsXml.push(XW.xlsxRow(1, [XW.xlsxCell(0, 1, "Install Tracker — " + (state.projectName || "Untitled project"), "title", false)], 24));
+    var hasHrs = o.hrsTotal > 0;
+    // (with labor hours on the sheet, I5 shows the hours, so "out of scope" moves up to this line)
     rowsXml.push(XW.xlsxRow(2, [XW.xlsxCell(0, 2, "Atlantis UGS · generated " + new Date().toLocaleString() + " · " +
-      floors.length + " floors, " + allRooms.length + " rooms, " + allItems.length + " line items", "muted", false)]));
+      floors.length + " floors, " + allRooms.length + " rooms, " + allItems.length + " line items" +
+      (hasHrs && o.outOfScope ? ", " + o.outOfScope + " out of scope" : ""), "muted", false)]));
     rowsXml.push(XW.xlsxRow(3, [], 6));
 
     // Progress bar: 62 blocks (fills D:I), green for done, light for remaining.
@@ -2681,14 +2774,15 @@
       XW.xlsxCell(3, 5, o.installed + " installed", "statGreen", false), XW.xlsxCell(4, 5, "", "statGreen", false),
       XW.xlsxCell(5, 5, o.inProgress + " in progress", "statGold", false),
       XW.xlsxCell(6, 5, o.notStarted + " not started", "statGray", false), XW.xlsxCell(7, 5, "", "statGray", false),
-      XW.xlsxCell(8, 5, o.outOfScope ? o.outOfScope + " out of scope" : "", o.outOfScope ? "statGray" : "panel", false)
+      hasHrs ? XW.xlsxCell(8, 5, hrsLabel(o.hrsInstalled, o.hrsTotal) + " labor hrs installed", "statGreen", false)
+             : XW.xlsxCell(8, 5, o.outOfScope ? o.outOfScope + " out of scope" : "", o.outOfScope ? "statGray" : "panel", false)
     ]);
     rowsXml.push(XW.xlsxRow(5, row5, 22));
 
     var row6 = [XW.xlsxCell(0, 6, "INSTALLED", "pctLabel", false)].concat(blank(1, 2, 6, "pctLabel"), [
       XW.xlsxCell(3, 6, c.pulled + " / " + c.pulledOf + " rooms cable pulled", "statCable", false), XW.xlsxCell(4, 6, "", "statCable", false),
       XW.xlsxCell(5, 6, c.terminated + " / " + c.terminatedOf + " rooms cable terminated", "statCable", false),
-      XW.xlsxCell(6, 6, c.tested + " / " + c.testedOf + " rooms cable tested", "statCable", false), XW.xlsxCell(7, 6, "", "statCable", false), XW.xlsxCell(8, 6, "", "statCable", false)
+      XW.xlsxCell(6, 6, c.tested + " / " + c.testedOf + " rooms cable tested · " + c.power + " / " + c.powerOf + " power tested", "statCable", false), XW.xlsxCell(7, 6, "", "statCable", false), XW.xlsxCell(8, 6, "", "statCable", false)
     ]);
     rowsXml.push(XW.xlsxRow(6, row6, 22));
     rowsXml.push(XW.xlsxRow(7, [], 8));
@@ -2705,7 +2799,15 @@
     var rowNum = EXCEL_HEADER_ROW;
 
     var header = ["Floor","Room","Room Type","#","Mfr / Model","Description","Qty","Status","Notes"];
-    rowsXml.push(XW.xlsxRow(rowNum, header.map(function(h, i){ return XW.xlsxCell(i, rowNum, h, "header", false); })));
+    var hasHrs = scheduleHasHrs();
+    // cells J..M for a floor / room / header row: blank, blank, blank, then the hours
+    function hrsCells(row, value, style, isNumber){
+      if(!hasHrs) return [];
+      return [XW.xlsxCell(9, row, "", style, false), XW.xlsxCell(10, row, "", style, false), XW.xlsxCell(11, row, "", style, false),
+        XW.xlsxCell(EXCEL_HRS_COL, row, value, style, !!isNumber)];
+    }
+    function roundHrs(n){ return Math.round(n * 100) / 100; }
+    rowsXml.push(XW.xlsxRow(rowNum, header.map(function(h, i){ return XW.xlsxCell(i, rowNum, h, "header", false); }).concat(hrsCells(rowNum, "Labor Hrs", "header", false))));
     rowNum++;
 
     groupByFloor().forEach(function(f){
@@ -2715,6 +2817,7 @@
       var floorLabel = floorName(f.floor) + " — " + f.rooms.length + " rooms · " + fStats.pct + "% installed";
       var floorCells = [];
       for(var c = 0; c < 9; c++){ floorCells.push(XW.xlsxCell(c, rowNum, c === 0 ? floorLabel : "", "header", false)); }
+      floorCells = floorCells.concat(hrsCells(rowNum, roundHrs(fStats.hrsTotal), "header", true));
       rowsXml.push(XW.xlsxRow(rowNum, floorCells));
       rowNum++;
 
@@ -2723,6 +2826,7 @@
         var roomLabel = roomName(r.roomNumber) + (r.roomType ? " — " + r.roomType : "") + " · " + rStats.pct + "% installed";
         var roomCells = [];
         for(var c2 = 0; c2 < 9; c2++){ roomCells.push(XW.xlsxCell(c2, rowNum, c2 === 0 ? roomLabel : "", "divider", false)); }
+        roomCells = roomCells.concat(hrsCells(rowNum, roundHrs(rStats.hrsTotal), "divider", true));
         rowsXml.push(XW.xlsxRow(rowNum, roomCells));
         rowNum++;
 
@@ -2738,6 +2842,7 @@
             XW.xlsxCell(7, rowNum, excelStatusLabelFor(it), excelStatusStyle(it), false),
             XW.xlsxCell(8, rowNum, it.notes || "", "default", false)
           ];
+          if(hasHrs && itemHrs(it) > 0) cells.push(XW.xlsxCell(EXCEL_HRS_COL, rowNum, roundHrs(itemHrs(it)), "default", true));
           rowsXml.push(XW.xlsxRow(rowNum, cells));
           rowNum++;
         });
@@ -2770,7 +2875,7 @@
     if(!window.XlsxWriter){ exportCsv(); return; }
     try{
       var rowsXml = buildScheduleWorkbookRows();
-      var bytes = window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW });
+      var bytes = window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, scheduleHasHrs() ? EXCEL_COL_WIDTHS_HRS : EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW });
       var filename = downloadName("xlsx");
       downloadFile(filename, bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     } catch(e){
@@ -2814,7 +2919,9 @@
         (overall.outOfScope ? ('<span class="pr-chip oos">' + overall.outOfScope + ' out of scope</span>') : '') +
         (function(c){ return '<span class="pr-chip not_started">' + c.pulled + ' / ' + c.pulledOf + ' rooms cable pulled</span>' +
           '<span class="pr-chip not_started">' + c.terminated + ' / ' + c.terminatedOf + ' rooms cable terminated</span>' +
-          '<span class="pr-chip not_started">' + c.tested + ' / ' + c.testedOf + ' rooms cable tested</span>'; })(computeCableTotals()) +
+          '<span class="pr-chip not_started">' + c.tested + ' / ' + c.testedOf + ' rooms cable tested</span>' +
+          '<span class="pr-chip not_started">' + c.power + ' / ' + c.powerOf + ' rooms power tested</span>'; })(computeCableTotals()) +
+        (overall.hrsTotal > 0 ? '<span class="pr-chip installed">' + hrsLabel(overall.hrsInstalled, overall.hrsTotal) + ' labor hrs installed</span>' : '') +
       '</div>';
 
     floors.forEach(function(f){
@@ -2896,7 +3003,8 @@
   // Progress dashboard at the top of the PDF — mirrors the on-screen summary card.
   function drawPdfDashboard(doc, PW, overall, cable){
     var CL = PW.CONTENT_LEFT, CW = PW.CONTENT_WIDTH;
-    var top = doc.y, h = 70;
+    var hasHrs = overall.hrsTotal > 0;
+    var top = doc.y, h = hasHrs ? 88 : 70;   // one more line when there are labor hours to show
     var border = [0xDD/255,0xD4/255,0xBD/255];
     doc.rect(CL, top - h, CW, h, border);
     doc.rect(CL + 0.8, top - h + 0.8, CW - 1.6, h - 1.6, PDF_COLORS.white);
@@ -2931,10 +3039,13 @@
     var colW = bw / 4;
     row1.forEach(function(r, i){ stat(bx + i * colW, top - 37, r[0], r[1], r[2]); });
     // Row 2: cable checks by room
-    var cw3 = bw / 3;
-    [[cable.pulled, "rooms cable pulled", cable.pulledOf], [cable.terminated, "rooms cable terminated", cable.terminatedOf], [cable.tested, "rooms cable tested", cable.testedOf]].forEach(function(r, i){
-      stat(bx + i * cw3, top - 57, null, r[0] + " / " + r[2], r[1]);
+    // (four across, so the labels are kept short: these are all counts of rooms)
+    var cw4 = bw / 4;
+    [[cable.pulled, "cable pulled", cable.pulledOf], [cable.terminated, "terminated", cable.terminatedOf], [cable.tested, "cable tested", cable.testedOf], [cable.power, "power tested", cable.powerOf]].forEach(function(r, i){
+      stat(bx + i * cw4, top - 57, null, r[0] + " / " + r[2], r[1]);
     });
+    // Row 3: labor hours used vs sold
+    if(hasHrs) stat(bx, top - 75, PDF_COLORS.greenFg, hrsLabel(overall.hrsInstalled, overall.hrsTotal), "labor hrs installed");
 
     doc.y = top - h - 10;
   }
@@ -3166,13 +3277,16 @@
     if(!state.order.length){
       return { error: "This spreadsheet has nothing to load progress into yet - build the schedule with Load BOM first, then load progress on top of it." };
     }
-    var rows = null;
+    var rows = null, hrsCol = -1;
     for(var s = 0; s < sheets.length && !rows; s++){
       var sheetRows = sheets[s].rows || [];
       for(var i = 0; i < sheetRows.length; i++){
         var row = sheetRows[i] || [];
-        if(EXCEL_PROGRESS_HEADER.every(function(h, ci){ return String(row[ci] == null ? "" : row[ci]).trim() === h; })){
+        // capitals and spacing don't matter, and the Room Type heading may say more ("Room Type · AV Ref")
+        if(EXCEL_PROGRESS_HEADER.every(function(h, ci){ var have = looseText(row[ci]), want = looseText(h); return have === want || (ci === 2 && have.indexOf(want) === 0); })){
           rows = sheetRows.slice(i + 1);
+          // a "Labor Hrs" column, wherever it is (this tracker writes it in column M)
+          for(var hc = 9; hc < row.length; hc++){ if(/^labou?r ?(hrs?|hours?)$/.test(looseText(row[hc]).replace(/\./g, ""))){ hrsCol = hc; break; } }
           break;
         }
       }
@@ -3187,9 +3301,35 @@
       return { mfr: cell(parts.shift()), model: cell(parts.join("·")) };
     }
     function qtyOf(v){ var n = parseQty(v); return n != null && n >= 0 ? n : null; }
+    // a line's labor hours as written in the sheet (blank = leave the item's hours alone)
+    function hrsOf(v){
+      if(v == null || cell(v) === "") return null;
+      var n = typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, ""));
+      return isFinite(n) && n >= 0 ? n : null;
+    }
+    // hours each, from a line total and the line's qty
+    function hrsEach(total, qty){
+      var q = qty != null ? Number(qty) : 1;
+      return Math.round((q > 0 ? total / q : total) * 10000) / 10000;
+    }
+    // a cable Status cell as typed by a person: the option's own label, or Done / Not done / By others ...
+    function cableValueFromLabel(check, label){
+      var t = looseText(label).replace(/[-_]/g, " ");
+      if(t === "") return null;
+      if(t === "out of scope" || t === "by others" || t === "on others" || t === "others") return { scope: false };
+      var opt = check.options.filter(function(o){ return looseText(o.label) === looseText(label); })[0];
+      if(opt) return { value: opt.value };
+      var has = function(v){ return check.options.some(function(o){ return o.value === v; }); };
+      if(/^(done|complete|completed|yes|y|installed|terminated|pass|passed|tested)$/.test(t)) return { value: CABLE_DONE_VALUES[check.key] };
+      if(/^(not done|no|n|not started|not installed|not inst\.?|not terminated|not tested|pending|open)$/.test(t)) return { value: "not_installed" };
+      if(/^(in progress|in prog\.?|started|partial)$/.test(t)) return { value: "in_progress" };
+      if(/^(fail|failed)$/.test(t)) return { value: has("fail") ? "fail" : "not_installed" };
+      if(/^(n\/a|na|not applicable)$/.test(t)) return { value: "na" };
+      return null;
+    }
 
     // ---- pass 1: read the sheet into item rows and cable rows ----
-    var plan = [];
+    var plan = [], unknownChecks = {};
     var curFloor = null, curRoom = null, curType = "";
     rows.forEach(function(row){
       if(!row || !row.length) return;
@@ -3202,11 +3342,14 @@
         return;
       }
       if(mm === "" && desc === "") return;
+      // a checklist row this tracker doesn't have ("Pathway Complete?"): never an item
+      if(mm === "" && c6 === "" && /\?\s*$/.test(desc)){ unknownChecks[desc] = (unknownChecks[desc] || 0) + 1; return; }
       // an item row; Floor / Room left blank = same as the row above
       if(c1 !== ""){ curRoom = c1; curType = c2; if(c0 !== "") curFloor = /^-?\d+$/.test(c0) ? Number(c0) : c0; }
       else if(c0 !== "" && curRoom == null){ curFloor = /^-?\d+$/.test(c0) ? Number(c0) : c0; }
       if(curRoom == null || curFloor == null) return;
-      plan.push({ kind: "item", floor: curFloor, room: curRoom, roomType: curType, idx: c3, mm: mm, desc: desc, qty: qtyOf(row[6]), status: c7, notes: notes });
+      plan.push({ kind: "item", floor: curFloor, room: curRoom, roomType: curType, idx: c3, mm: mm, desc: desc, qty: qtyOf(row[6]), status: c7, notes: notes,
+        hrs: hrsCol >= 0 ? hrsOf(row[hrsCol]) : null });
     });
 
     // ---- pass 2: decide what each item row is (same / edit / new) ----
@@ -3265,6 +3408,10 @@
           it.mfr = m.mfr; it.model = m.model; it.description = p.desc;
         }
         if(p.qty != null) it.qty = p.qty;
+        if(p.hrs != null){
+          var each = hrsEach(p.hrs, it.qty);
+          if(each > 0 || it.laborHrs != null) it.laborHrs = each;
+        }
         setProgress(it, p);
         if(itItemJsonSafe(it) !== before){ it.updatedAt = new Date().toISOString(); changed++; if(p.edit) edited++; }
         applied++;
@@ -3295,6 +3442,7 @@
         roomIndexOnFloor: roomIndexOnFloor, itemIndexInRoom: idx,
         qty: p.qty != null ? p.qty : 1, mfr: mNew.mfr, model: mNew.model, description: p.desc
       });
+      if(p.hrs != null && p.hrs > 0) state.items[id].laborHrs = hrsEach(p.hrs, state.items[id].qty);
       state.order.push(id);
       ensureCable(key);
       setProgress(state.items[id], p);
@@ -3306,12 +3454,12 @@
       var key = roomKeyFor(p);
       if(!key) return;
       var cable = ensureCable(key), before = JSON.stringify(cable), ck = p.check.key;
-      if(looseText(p.value) === "out of scope"){
+      var read = cableValueFromLabel(p.check, p.value);
+      if(!read) return;
+      if(read.scope === false){
         cable[ck + "InScope"] = false;
       } else {
-        var opt = p.check.options.filter(function(o){ return looseText(o.label) === looseText(p.value); })[0];
-        if(!opt) return;
-        cable[ck] = opt.value;
+        cable[ck] = read.value;
         if(cable[ck + "InScope"] === false) cable[ck + "InScope"] = true;
       }
       if(p.notes) cable[ck + "Notes"] = p.notes;
@@ -3323,11 +3471,12 @@
     updateFileLabel();
     cloudNotifyBulkItemsReplaced(); // save what was just loaded
     render();
-    return { applied: applied, cableApplied: cableApplied, changed: changed, edited: edited, added: added, unreadStatus: unreadStatus };
+    return { applied: applied, cableApplied: cableApplied, changed: changed, edited: edited, added: added, unreadStatus: unreadStatus,
+      hrsRead: hrsCol >= 0, unknownChecks: Object.keys(unknownChecks) };
   }
   // one item as text, for "did this row change anything?" (the fields a sheet can touch)
   function itItemJsonSafe(it){
-    return JSON.stringify([it.mfr, it.model, it.description, it.qty, it.inScope, it.status, it.notes]);
+    return JSON.stringify([it.mfr, it.model, it.description, it.qty, it.inScope, it.status, it.notes, it.laborHrs == null ? null : it.laborHrs]);
   }
 
   function loadProgress(file){
@@ -3340,7 +3489,9 @@
           (res.changed ? plural(res.changed, "line") + " changed and saved" +
               (res.edited || res.added ? " (" + [res.edited ? plural(res.edited, "item") + " edited" : "", res.added ? plural(res.added, "new item") + " added" : ""].filter(Boolean).join(", ") + ")" : "") + "."
             : "Nothing was different from what's already here, so nothing changed.") +
-          (res.unreadStatus ? "\n\n" + plural(res.unreadStatus, "Status cell") + " couldn't be understood and " + (res.unreadStatus === 1 ? "was" : "were") + " left as is. Use: Not started, In progress, Installed (or Completed), or Out of scope." : ""));
+          (res.unreadStatus ? "\n\n" + plural(res.unreadStatus, "Status cell") + " couldn't be understood and " + (res.unreadStatus === 1 ? "was" : "were") + " left as is. Use: Not started, In progress, Installed (or Completed), or Out of scope." : "") +
+          (res.hrsRead ? "\n\nLabor hours were read from the Labor Hrs column." : "") +
+          (res.unknownChecks && res.unknownChecks.length ? "\n\nLeft out, because the tracker has no such check: " + res.unknownChecks.join(", ") + "." : ""));
       }).catch(function(e){ alert("Couldn't read that Excel file: " + (e && e.message ? e.message : e)); });
       return;
     }
@@ -3367,7 +3518,8 @@
     { key:"qty", label:"Qty" },
     { key:"mfr", label:"Manufacturer" },
     { key:"model", label:"Model / part #" },
-    { key:"description", label:"Description" }
+    { key:"description", label:"Description" },
+    { key:"laborHrs", label:"Labor hrs (each)" }
   ];
   var TOTAL_RE = /^(sub ?total|grand ?total|total|tax|shipping|freight)\b|(^|\s)(sub-? ?total|grand total|total)(\s*:)?\s*$/i;
   var NON_EQUIPMENT_TAB_RE = /\b(sow|scope|terms|notes?|version|change ?log|instructions?|cover|summary|pricing|labou?r|revisions?)\b/i;
@@ -3416,6 +3568,7 @@
   function headerFieldFor(text){
     var s = String(text == null ? "" : text).toLowerCase().replace(/[^a-z0-9#\/ ]+/g, " ").replace(/\s+/g, " ").trim();
     if(!s || s.length > 40) return null;
+    if(/\b(labou?r|man|install(ation)?) ?(hrs?|hours?)\b|^(hrs?|hours?)( (each|ea|per unit))?$/.test(s)) return "laborHrs";
     if(/^(qty|qnty|quantity|quan|count|units?|ea|each)\b|\bqty\b|\bquantity\b/.test(s)) return "qty";
     if(/\broom ?type\b|\bspace ?type\b|\broom ?standard\b/.test(s)) return "roomType";
     if(/\bpart\b|\bmodel\b|\bsku\b|\bp ?\/ ?n\b|^pn$|\bcatalog\b|\bpart ?#/.test(s)) return "model";
@@ -3477,6 +3630,19 @@
   function analyzeSheet(sh){
     var rows = sh.rows, map = sh.map, out = [];
     function get(row, key){ return map[key] == null ? "" : cellStr(row[map[key]]); }
+    // Labor hours in a BOM are per unit. A sheet in this tracker's own Excel
+    // layout (it has Status and "Mfr / Model" columns) lists each LINE's
+    // hours instead, so those are divided back by the qty.
+    var hdrCells = (rows[sh.headerRow] || []).map(looseText);
+    var hrsAreLineTotals = hdrCells.indexOf("status") > -1 && hdrCells.indexOf("mfr / model") > -1;
+    function hrsEachOf(row, qty){
+      var raw = get(row, "laborHrs");
+      if(raw === "") return null;
+      var n = parseFloat(raw.replace(/,/g, ""));
+      if(!isFinite(n) || n <= 0) return null;
+      if(hrsAreLineTotals && qty > 0) n = n / qty;
+      return Math.round(n * 10000) / 10000;
+    }
     for(var r = sh.headerRow + 1; r < rows.length; r++){
       var row = rows[r] || [];
       var filled = row.filter(function(v){ return cellStr(v) !== ""; });
@@ -3494,7 +3660,8 @@
         if(hasQty && qtyNum === 0){ out.push({ kind: "skip", r: r, why: "qty 0" }); continue; }
         out.push({ kind: "item", r: r, line: {
           floor: get(row, "floor"), room: get(row, "room"), roomType: get(row, "roomType"),
-          qty: qtyNum != null ? qtyNum : 1, mfr: mfr, model: model, description: desc
+          qty: qtyNum != null ? qtyNum : 1, mfr: mfr, model: model, description: desc,
+          laborHrs: hrsEachOf(row, qtyNum != null ? qtyNum : 1)
         }});
         continue;
       }
@@ -3782,11 +3949,13 @@
       perFloor[fk] = (perFloor[fk] || 0) + 1;
       rm.lines.forEach(function(ln, i){
         n++;
-        items.push({
+        var item = {
           id: "itm-" + String(n).padStart(4, "0"), floor: rm.floor, roomNumber: String(rm.roomNumber), roomType: rm.roomType || "",
           roomKey: fk + "-" + rm.roomNumber, roomIndexOnFloor: perFloor[fk], itemIndexInRoom: i + 1,
           qty: ln.qty, mfr: ln.mfr, model: ln.model, description: ln.description
-        });
+        };
+        if(ln.laborHrs != null) item.laborHrs = ln.laborHrs;
+        items.push(item);
       });
     });
     return items;
@@ -4095,6 +4264,7 @@
       document.getElementById("addModel").value = editing.model || "";
       document.getElementById("addDesc").value = editing.description || "";
       document.getElementById("addQty").value = editing.qty != null ? editing.qty : 1;
+      document.getElementById("addHrs").value = Number(editing.laborHrs) > 0 ? editing.laborHrs : "";
       addItemSetError("");
       addItemSyncRoomFields();
       document.getElementById("addItemDialog").showModal();
@@ -4106,7 +4276,7 @@
       return '<option value="' + escapeHtml(r.key) + '">' + escapeHtml(floorName(r.floor)) + " · " + escapeHtml(roomName(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
     }).join("");
     sel.value = "__new";
-    ["addRoomNo", "addRoomType", "addMfr", "addModel", "addDesc"].forEach(function(id){ document.getElementById(id).value = ""; });
+    ["addRoomNo", "addRoomType", "addMfr", "addModel", "addDesc", "addHrs"].forEach(function(id){ document.getElementById(id).value = ""; });
     document.getElementById("addFloor").value = "1";
     document.getElementById("addQty").value = "1";
     addItemSetError("");
@@ -4121,10 +4291,15 @@
     var qty = parseInt(val("addQty"), 10);
     if(!(qty >= 1)){ addItemSetError("Qty must be 1 or more."); return; }
     if(!model && !desc){ addItemSetError("Enter a model or a description."); return; }
+    var hrsRaw = val("addHrs"), hrs = hrsRaw === "" ? null : Number(hrsRaw);
+    if(hrs !== null && !(hrs >= 0)){ addItemSetError("Labor hrs must be 0 or more (or leave it blank)."); return; }
     if(addEditId){
       // status, notes and room stay as they are - only what the item IS changes
       if(!state.items[addEditId]){ addItemSetError("That item is no longer in the schedule."); return; }
-      updateItem(addEditId, { mfr: mfr, model: model, description: desc, qty: qty });
+      var patch = { mfr: mfr, model: model, description: desc, qty: qty };
+      // (left alone when it was blank and still is, so the item saves exactly as before)
+      if(hrs !== null || state.items[addEditId].laborHrs != null) patch.laborHrs = hrs;
+      updateItem(addEditId, patch);
       addItemClose();
       return;
     }
@@ -4158,6 +4333,7 @@
       roomIndexOnFloor: roomIndexOnFloor, itemIndexInRoom: itemIndexInRoom,
       qty: qty, mfr: mfr, model: model, description: desc
     });
+    if(hrs !== null) state.items[id].laborHrs = hrs;
     state.order.push(id);
     ensureCable(roomKey);
     state.dirty = true;
@@ -4521,7 +4697,9 @@
     if (!base) base = {json: rjson, pos: rpos, ts: rts};
     var baseObj = {};
     try{ baseObj = JSON.parse(base.json); }catch(e){}
-    var merged = {};
+    // starts from everything the server sent, so a field this version doesn't
+    // know about (added by a newer one) is carried along instead of dropped
+    var merged = Object.assign({}, rnorm);
     ITEM_ALL_FIELDS.forEach(function(k){
       merged[k] = JSON.stringify(local[k]) !== JSON.stringify(baseObj[k]) ? local[k] : rnorm[k];
     });
@@ -4543,7 +4721,7 @@
     rts = itTsMs(rts);
     var base = itc.syncedCable.get(roomKey);
     if (base && base.ts && rts && rts < base.ts) return false;
-    var rnorm = Object.assign({pulled: "not_installed", terminated: "not_installed", tested: "not_installed", pulledNotes: "", terminatedNotes: "", testedNotes: ""}, rdata);
+    var rnorm = cableDefaults(rdata);
     var rjson = itCableJson(rnorm);
     var local = state.cable[roomKey];
     if (!local){
@@ -4554,7 +4732,7 @@
     if (!base) base = {json: rjson, ts: rts};
     var baseObj = {};
     try{ baseObj = JSON.parse(base.json); }catch(e){}
-    var merged = {}, remote = {};
+    var merged = Object.assign({}, rnorm), remote = {};   // (see itMergeRemoteItem: unknown fields are kept)
     CABLE_FIELDS.forEach(function(k){
       remote[k] = rnorm[k];
       merged[k] = JSON.stringify(local[k]) !== JSON.stringify(baseObj[k]) ? local[k] : rnorm[k];
@@ -4578,7 +4756,9 @@
     ITEM_ALL_FIELDS.forEach(function(k){ out[k] = d[k]; });
     return JSON.stringify(out);
   }
-  var CABLE_FIELDS = ["pulled", "terminated", "tested", "pulledNotes", "terminatedNotes", "testedNotes", "pulledInScope", "terminatedInScope", "testedInScope"];
+  // the Power Test fields go last: a room without them then saves exactly as it did before they existed
+  var CABLE_FIELDS = ["pulled", "terminated", "tested", "pulledNotes", "terminatedNotes", "testedNotes", "pulledInScope", "terminatedInScope", "testedInScope",
+    "power", "powerNotes", "powerInScope"];
   // same idea as itItemJson, for a room's cable record
   function itCableJson(d){
     var out = {};
@@ -4728,7 +4908,7 @@
   function itPushNow(force){
     if (!itc.projectId || !itc.sb) return Promise.resolve();
     // view-only accounts never write (the database would refuse it anyway)
-    if (itc.readOnly || itc.role === "viewer"){ itIsDirty = false; itStatusOk(); return Promise.resolve(); }
+    if (itc.readOnly || itc.role === "viewer" || itc.role === "pc"){ itIsDirty = false; itStatusOk(); return Promise.resolve(); }
     // A load is running: let it finish first. It merges what other people
     // changed into this device's copy and then sends (see itPullAll) -
     // sending first would put this device's older values over theirs. Only
@@ -5475,18 +5655,23 @@
   //    no edits of any kind, and Excel export / Save progress are removed
   //    entirely (see it-roles.css).
   function itApplyRoleUi(role, locked){
-    document.body.classList.remove("it-role-viewer", "it-locked-project", "it-role-dashboard");
+    document.body.classList.remove("it-role-viewer", "it-locked-project", "it-role-dashboard", "it-pc-one-project");
     itc.readOnly = (role === "viewer" && locked) || role === "dashboard";
     if (role === "viewer"){
       document.body.classList.add("it-role-viewer");
       if (locked) document.body.classList.add("it-locked-project");
     }
+    // role "pc" = PC pinned to one project: the same screen as a PC (hence the
+    // same it-role-viewer rules), minus the project picker and the dashboard
+    if (role === "pc") document.body.classList.add("it-role-viewer", "it-pc-one-project");
     // view-only dashboard account: nothing but the Projects dashboard (see it-roles.css)
     if (role === "dashboard") document.body.classList.add("it-role-dashboard");
     var banner = itEl("itRoleBanner");
     if (banner){
-      banner.textContent = role === "dashboard" ? "Dashboard — view only" : role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
+      banner.textContent = role === "dashboard" ? "Dashboard — view only" : role === "pc" ? "PC — one project" : role === "viewer" ? (locked ? "Viewer — view/sort/PDF only" : "PC — all projects") : "";
     }
+    // what a role may see can differ (labor hours), so anything already drawn is redrawn
+    if (state.order.length) render();
   }
 
   // The cover page after sign-in: staff and PC land on the fleet Dashboard
@@ -5514,7 +5699,13 @@
         itApplyRoleUi(role, false);
         return itLegacyResume();
       }
-      if (role === "viewer" && projectId){
+      if (role === "pc" && !projectId){
+        itApplyRoleUi(role, true);
+        itStatus("bad", "No project is assigned to this account — contact your administrator.");
+        return;
+      }
+      if ((role === "viewer" || role === "pc") && projectId){
+        // pinned to one project: straight into it (a Viewer to look, a PC to work)
         itApplyRoleUi(role, true);
         return itc.sb.from("it_projects").select("id,name,meta").eq("id", projectId).maybeSingle().then(function(jr){
           if (jr.error || !jr.data){
@@ -5623,7 +5814,8 @@
     var cableTotals = computeCableTotals();
     return {
       pct: overall.pct, installed: overall.installed, inProgress: overall.inProgress, notStarted: overall.notStarted,
-      cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms
+      cablePulled: cableTotals.pulled, cableTerminated: cableTotals.terminated, cableTested: cableTotals.tested, cableTotalRooms: cableTotals.totalRooms,
+      cablePower: cableTotals.power, hrsInstalled: overall.hrsInstalled, hrsTotal: overall.hrsTotal
     };
   }
 
@@ -5728,13 +5920,15 @@
 
   function itMuKind(u){
     if (u.role === "viewer") return u.projectId ? "viewer-locked" : "viewer-any";
+    if (u.role === "pc") return "pc-locked";
     if (u.role === "dashboard") return "dashboard";
     return "staff";
   }
-  function itMuKindNeedsProject(kind){ return kind === "viewer-locked"; }
+  function itMuKindNeedsProject(kind){ return kind === "viewer-locked" || kind === "pc-locked"; }
   function itMuRoleAndProject(kind, projectId){
     if (kind === "viewer-locked") return {role: "viewer", projectId: projectId || null};
     if (kind === "viewer-any") return {role: "viewer", projectId: null};
+    if (kind === "pc-locked") return {role: "pc", projectId: projectId || null};
     if (kind === "dashboard") return {role: "dashboard", projectId: null};
     return {role: "staff", projectId: null};
   }
@@ -5745,6 +5939,10 @@
   }
 
   function itMuMsg(text, kind){
+    // the database only accepts "PC - one project" once its small SQL file has been run
+    if (kind === "bad" && /it_profiles_role_check/.test(String(text))){
+      text = "That user group isn't in the database yet. Run add-pc-one-project-role.sql in the Supabase SQL editor, then save again.";
+    }
     var m = itEl("itMuMsg");
     m.textContent = text || "";
     m.className = "it-mu-msg" + (kind ? " " + kind : "");
@@ -5777,6 +5975,7 @@
             '<option value="staff"' + (kind === "staff" ? " selected" : "") + '>Staff (full access)</option>' +
             '<option value="viewer-locked"' + (kind === "viewer-locked" ? " selected" : "") + '>Viewer - one project (view/sort/PDF only)</option>' +
             '<option value="viewer-any"' + (kind === "viewer-any" ? " selected" : "") + '>PC - all projects</option>' +
+            '<option value="pc-locked"' + (kind === "pc-locked" ? " selected" : "") + '>PC - one project</option>' +
             '<option value="dashboard"' + (kind === "dashboard" ? " selected" : "") + '>Dashboard (view-only, no edits)</option>' +
           '</select>' +
           /* visibility, not display:none - a display:none child is removed
@@ -5981,19 +6180,22 @@
     }
 
     var cableKeys = Object.keys(cableByRoomKey).filter(function(k){ return roomMap[k]; }); // rooms that still have items
-    var cablePulled = 0, cableTerminated = 0, cableTested = 0;
-    var cablePulledOf = 0, cableTerminatedOf = 0, cableTestedOf = 0;
+    var cablePulled = 0, cableTerminated = 0, cablePower = 0, cableTested = 0;
+    var cablePulledOf = 0, cableTerminatedOf = 0, cablePowerOf = 0, cableTestedOf = 0;
     cableKeys.forEach(function(k){
       var c = cableByRoomKey[k];
       if (cableCheckApplies(c, "pulled")){ cablePulledOf++; if (c.pulled === "installed") cablePulled++; }
       if (cableCheckApplies(c, "terminated")){ cableTerminatedOf++; if (c.terminated === "terminated") cableTerminated++; }
+      if (cableCheckApplies(c, "power")){ cablePowerOf++; if (c.power === "pass") cablePower++; }
       if (cableCheckApplies(c, "tested")){ cableTestedOf++; if (c.tested === "pass") cableTested++; }
     });
+    var hrs = sumHrs(items);
 
     return {
       pct: pct, installed: installed, inProgress: inProgress, notStarted: notStarted,
       cablePulled: cablePulled, cableTerminated: cableTerminated, cableTested: cableTested, cableTotalRooms: cableKeys.length,
-      cablePulledOf: cablePulledOf, cableTerminatedOf: cableTerminatedOf, cableTestedOf: cableTestedOf
+      cablePulledOf: cablePulledOf, cableTerminatedOf: cableTerminatedOf, cableTestedOf: cableTestedOf,
+      cablePower: cablePower, cablePowerOf: cablePowerOf, hrsTotal: hrs.total, hrsInstalled: hrs.installed
     };
   }
 
@@ -6100,6 +6302,9 @@
         '<div class="itd-row" title="Rooms with cable pulled / terminated / tested, out of the rooms each one applies to (N/A and out of scope are left out)">' +
           itdStat(s.cablePulled + "/" + s.cablePulledOf, "Cable pulled") + itdStat(s.cableTerminated + "/" + s.cableTerminatedOf, "Terminated") + itdStat(s.cableTested + "/" + s.cableTestedOf, "Tested") +
         '</div>' +
+        '<div class="itd-row" title="Rooms power tested, and labor hours installed out of the hours sold">' +
+          itdStat(s.cablePower + "/" + s.cablePowerOf, "Power tested") + itdStat(s.hrsTotal > 0 ? fmtHrs(s.hrsInstalled) + "/" + fmtHrs(s.hrsTotal) : "—", "Labor hrs") + '<div class="itd-stat"></div>' +
+        '</div>' +
       '</button>';
     }).join("");
   }
@@ -6185,7 +6390,7 @@
   // internal debug hook, off unless config.js opts in with debug:true (never
   // set in the real config.js template, so this is inert once deployed) -
   // captured AFTER itCloudBoot so the notify hooks below are the real ones
-  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, mergeDataset: mergeDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject, buildPdfBytes: function(){ return window.PdfWriter.buildBytes(buildSchedulePdfPages()); } };
+  if (ITCLOUD && ITCLOUD.debug) window.__itApp = { state: state, loadDataset: loadDataset, mergeDataset: mergeDataset, updateItem: updateItem, updateCable: updateCable, render: render, ensureCable: ensureCable, notifyItemChanged: cloudNotifyItemChanged, notifyCableChanged: cloudNotifyCableChanged, notifyBulkItemsReplaced: cloudNotifyBulkItemsReplaced, notifyProjectMetaChanged: cloudNotifyProjectMetaChanged, createProjectFromBom: cloudCreateProjectFromBom, flushStatusBatch: itFlushStatusBatch, applyExcelProgress: applyExcelProgress, buildExcelBytes: function(){ var rowsXml = buildScheduleWorkbookRows(); return window.XlsxWriter.buildXlsxBytes("Install Tracker", rowsXml, scheduleHasHrs() ? EXCEL_COL_WIDTHS_HRS : EXCEL_COL_WIDTHS, { merges: rowsXml.merges, freezeRows: EXCEL_HEADER_ROW }); }, itc: itc, writeCache: itWriteCache, loadCache: itLoadCache, baseItemsWithProgress: baseItemsWithProgress, pullAll: itPullAll, openProject: itOpenProject, buildPdfBytes: function(){ return window.PdfWriter.buildBytes(buildSchedulePdfPages()); } };
   // installable app: works offline once opened over https
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
     window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
