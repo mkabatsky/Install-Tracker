@@ -548,6 +548,7 @@
   .it-cl-card input:focus{outline:2px solid var(--gold);outline-offset:0;border-color:var(--gold);}
   .it-cl-card .it-cl-go{width:100%;font-size:16px;font-weight:600;padding:13px;border:none;border-radius:9px;background:var(--navy);color:#fff;cursor:pointer;}
   .it-cl-card .it-cl-go:disabled{opacity:.6;}
+  .it-cl-card .it-cl-build{display:inline-block;margin-top:8px;opacity:.75;}
   .it-cl-card .it-cl-err{min-height:20px;font-size:13.5px;color:var(--danger);font-weight:600;margin-bottom:8px;}
   .it-cl-card .it-cl-foot{margin-top:12px;font-size:12px;color:var(--text-faint);text-align:center;line-height:1.5;}
 
@@ -808,7 +809,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 28 - October 9, 2026">Build 28</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 29 - October 9, 2026">Build 29</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -910,7 +911,7 @@
       <div class="it-cl-err" id="itLoginErr" role="alert" aria-live="assertive"></div>
       <button class="it-cl-go" id="itLoginBtn" type="submit">Sign in</button>
     </form>
-    <div class="it-cl-foot">Authorized users only.<br>Ask your administrator if you need an account or a new password.</div>
+    <div class="it-cl-foot">Authorized users only.<br>Ask your administrator if you need an account or a new password.<br><span class="it-cl-build">Build 29</span></div>
   </div>
 </div>
 
@@ -2049,6 +2050,54 @@
     return String(a).localeCompare(String(b), undefined, { numeric: true });
   }
 
+  // ---- Room order ----
+  // On a floor the numbered rooms come first, highest number at the top
+  // (312, 311, 306), then the named rooms from A to Z. A numbered room is one
+  // whose name is just a number: "312", "011", "13-053", "101A", "Room 204",
+  // "#7". Anything else is a named room ("Lobby", "Huddle Room A1-119",
+  // "FL18 Private Office #07"); a number inside a name only puts it in number
+  // order among rooms of the same name (Office #2 above Office #10).
+  // The order is worked out when a list is drawn - nothing about it is stored -
+  // so it is the same for everyone, on the screen, in the PDF and in Excel,
+  // and a renamed room moves to its new place by itself.
+  var ROOM_NUMBER_RE = /^((?:room|rm)\.?\s*#?\s*|#\s*)?(\d+(?:[-.\/]\d+)*)([A-Za-z]?)(?:\s*\(.*\))?$/i;
+  function roomNumberParts(v){
+    var m = ROOM_NUMBER_RE.exec(String(v == null ? "" : v).trim());
+    if(!m) return null;
+    return { said: !!m[1], nums: m[2].split(/[-.\/]/).map(Number), letter: m[3].toUpperCase() };
+  }
+  function compareRooms(a, b){
+    var ta = String(a.roomNumber == null ? "" : a.roomNumber).trim(), tb = String(b.roomNumber == null ? "" : b.roomNumber).trim();
+    var pa = roomNumberParts(ta), pb = roomNumberParts(tb);
+    // 0 = numbered, 1 = named, 2 = no name yet ("" or the "?" an import gives an empty cell)
+    var ca = pa ? 0 : (ta === "" || ta === "?") ? 2 : 1, cb = pb ? 0 : (tb === "" || tb === "?") ? 2 : 1;
+    if(ca !== cb) return ca - cb;
+    var d = 0, i, n;
+    if(ca === 0){
+      // highest first, part by part: 14-029 above 13-115 above 13-053; 101B above 101A above 101
+      for(i = 0, n = Math.max(pa.nums.length, pb.nums.length); i < n && !d; i++){
+        d = (i < pb.nums.length ? pb.nums[i] : -1) - (i < pa.nums.length ? pa.nums[i] : -1);
+      }
+      if(!d && pa.letter !== pb.letter) d = pa.letter < pb.letter ? 1 : -1;
+    } else if(ca === 1){
+      d = ta.localeCompare(tb, undefined, { numeric: true, sensitivity: "base" });
+    }
+    if(d) return d;
+    // the same number or name twice ("011" and "11", two rooms called Office):
+    // still one fixed order, so the list never changes between two looks
+    if(ta !== tb) return ta < tb ? -1 : 1;
+    var ya = String(a.roomType || ""), yb = String(b.roomType || "");
+    if(ya !== yb) return ya < yb ? -1 : 1;
+    d = (Number(a.roomIndexOnFloor) || 0) - (Number(b.roomIndexOnFloor) || 0);
+    if(d) return d;
+    var ka = String(a.key == null ? "" : a.key), kb = String(b.key == null ? "" : b.key);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  }
+  // rooms from several floors in one list: floor by floor, each floor in room order
+  function compareFloorRooms(a, b){
+    return compareFloors(String(a.floor), String(b.floor)) || compareRooms(a, b);
+  }
+
   // How a floor is shown: a plain number reads "Floor 3"; anything typed in
   // words ("Lobby", "Mezzanine", "Building B - Level 2") is shown as typed.
   function floorName(v){
@@ -2077,11 +2126,12 @@
     if(wasOpen) state.expandedFloor[String(newFloor)] = true;
     render();
   }
-  // How a room is shown: one that starts with a number reads "Room 101";
-  // a name in words ("Boardroom", "Install Tracker") is shown as typed.
+  // How a room is shown: one that is just a number reads "Room 101"; a name in
+  // words ("Boardroom", "4th Floor - Meeting", "Room 204") is shown as typed.
   function roomName(v){
     var t = String(v == null ? "" : v).trim();
-    return /^\d/.test(t) ? "Room " + t : (t || "Room");
+    var p = roomNumberParts(t);
+    return p && !p.said ? "Room " + t : (t || "Room");
   }
   // is there already a room with this number on this floor (other than exceptKey)?
   function roomNumberTaken(floor, roomNumber, exceptKey){
@@ -2181,7 +2231,7 @@
     return Object.keys(floors).sort(compareFloors).map(function(fk){
       var f = floors[fk];
       var rooms = f.roomOrder.map(function(k){ return f.rooms[k]; });
-      rooms.sort(function(a,b){ return a.roomIndexOnFloor - b.roomIndexOnFloor; });
+      rooms.sort(compareRooms);
       rooms.forEach(function(r){ r.items.sort(function(a,b){ return a.itemIndexInRoom - b.itemIndexInRoom; }); });
       return { floor: f.floor, rooms: rooms };
     });
@@ -4388,7 +4438,7 @@
     var h = '<div class="bom-summary"><div><b class="mono">' + res.floorCount + '</b><span>floors</span></div><div><b class="mono">' + res.rooms.length + '</b><span>rooms</span></div><div><b class="mono">' + res.lineCount + "</b><span>line items</span></div></div>";
     res.warnings.forEach(function(w){ h += '<p class="bom-error">' + escapeHtml(w) + "</p>"; });
     h += '<p class="bom-note">Creating the schedule replaces the one on screen' + (state.order.length ? " (" + plural(state.order.length, "line item") + ")" : "") + ". Every item starts as Not started. Use <b>Save progress</b> afterwards — the saved file now carries the equipment list too, so <b>Load progress</b> brings this schedule back.</p>";
-    var sorted = res.rooms.slice().sort(function(a, b){ return compareFloors(String(a.floor), String(b.floor)); });
+    var sorted = res.rooms.slice().sort(compareFloorRooms);
     h += '<div class="bom-scroll"><table class="bom-table"><thead><tr><th>Floor</th><th>Room</th><th>Room type</th><th>Lines</th><th>First items</th></tr></thead><tbody>';
     sorted.slice(0, 300).forEach(function(r){
       h += '<tr><td class="mono">' + escapeHtml(r.floor) + '</td><td class="mono"><b>' + escapeHtml(r.roomNumber) + "</b></td><td>" + escapeHtml(r.roomType) + '</td><td class="mono">' + r.lines.length + '</td><td class="bom-sub">' +
@@ -4465,7 +4515,7 @@
       return;
     }
     var sel = document.getElementById("addRoomSel");
-    var rooms = addRoomsOnHand();
+    var rooms = addRoomsOnHand().sort(compareFloorRooms);
     sel.innerHTML = '<option value="__new">+ New room</option>' + rooms.map(function(r){
       return '<option value="' + escapeHtml(r.key) + '">' + escapeHtml(floorName(r.floor)) + " · " + escapeHtml(roomName(r.roomNumber)) + (r.roomType ? " · " + escapeHtml(r.roomType) : "") + "</option>";
     }).join("");
@@ -5360,7 +5410,7 @@
     return itPullAll();
   }
 
-  var IT_SW_CACHE = "install-tracker-v28";   // the same name as CACHE in sw.js
+  var IT_SW_CACHE = "install-tracker-v29";   // the same name as CACHE in sw.js
   // ---------- a fresh sign-in every day ----------
   // Everyone except a Dashboard login is signed out once the date has changed
   // since they signed in, and the page then reloads - so every screen starts
