@@ -808,7 +808,7 @@
         <div class="brand-mark">AUGS</div>
         <div>
           <h1 id="projectTitle">Install Tracker</h1>
-          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 27 - October 8, 2026">Build 27</span></p>
+          <p class="subtitle"><span id="headerCounts">No schedule loaded</span> · <span id="fileLabel">unsaved</span> · <span id="buildTag" title="Build 28 - October 9, 2026">Build 28</span></p>
         </div>
       </div>
       <div class="it-cloud-bar">
@@ -4716,6 +4716,9 @@
     on: false, sb: null, user: null, projectId: null, projectName: "", channel: null,
     jobAddress: "", jobNumber: "", // extra job-info fields, synced the same way as projectName (see "job info" modal below)
     role: "staff", readOnly: false, // set by it-roles.js once the signed-in account's role is known
+    signingIn: false,         // true while this page's own form is doing the signing in
+    starting: false,          // true while the page is still deciding, at start-up, whether the stored sign-in stands
+    leaving: false,           // true once the sign-in is going or gone and the page is about to reload: nothing more is read or sent
     syncedItems: new Map(),   // id -> {json, pos, ts}: what the server last confirmed
     syncedCable: new Map(),   // roomKey -> {json, ts}
     metaBase: {},             // {projectName, dataSourceNote, jobAddress, jobNumber} the server last confirmed
@@ -4725,7 +4728,7 @@
     pushTimer: null, retryTimer: null, applyTimer: null, localSeed: null,
     clientId: "c" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
   };
-  var ITK = {user: "it.cloud.user", lastProject: "it.cloud.lastProject", cache: "it.cloud.cache.", prefs: "it.prefs.v1"};
+  var ITK = {user: "it.cloud.user", lastProject: "it.cloud.lastProject", cache: "it.cloud.cache.", prefs: "it.prefs.v1", profile: "it.cloud.profile", unsent: "it.cloud.unsent"};
   var IT_SUPABASE_CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js";
   var itSupabaseLibPromise = null;
   var itIsDirty = false; // true whenever there's a not-yet-sent change
@@ -5056,8 +5059,30 @@
     });
   }
 
+  // Is a sign-in still kept in this browser? Without one the database does not
+  // refuse a save - it quietly changes nothing and says "done" - and it answers
+  // every read with "nothing". So nothing is sent or read without one.
+  function itHasStoredSignIn(){
+    try{
+      for (var i = 0; i < window.localStorage.length; i++){
+        var k = window.localStorage.key(i);
+        if (k && /^sb-.+-auth-token$/.test(k) && window.localStorage.getItem(k)) return true;
+      }
+    }catch(e){ return true; }   // storage can't be looked at: don't hold saving up on a guess
+    return false;
+  }
+  // Nobody is signed in any more (it ended in another tab, or the page was
+  // started with no connection after the sign-in had gone). What is here stays
+  // in this device's copy of the project; online, the page goes to its sign-in form.
+  function itNoSignIn(){
+    clearTimeout(itc.pushTimer); clearTimeout(itc.retryTimer);
+    if (itc.projectId) itWriteCache();
+    if (navigator.onLine === false) itStatusOffline(); else itStatus("bad", "Signed out - sign in again to save");
+    itDay.recheck();
+  }
   function itPullAll(){
-    if (!itc.projectId || !itc.sb) return Promise.resolve();
+    if (!itc.projectId || !itc.sb || itc.leaving) return Promise.resolve();
+    if (!itHasStoredSignIn()){ itNoSignIn(); return Promise.resolve(); }
     if (itc.pulling){ itc.pullAgain = true; return Promise.resolve(); }
     itc.pulling = true;
     itc.pullStarted = Date.now();
@@ -5065,12 +5090,26 @@
     var pushSeq = itc.pushSeq;
     return itc.sb.from("it_projects").select("*").eq("id", projectId).maybeSingle().then(function(jr){
       if (jr.error) throw jr.error;
-      if (!jr.data || jr.data.deleted){ itProjectGone(); return null; }
+      if (projectId !== itc.projectId || itc.leaving) return null;
+      if (jr.data && jr.data.deleted){ itProjectGone(); return null; }
+      if (!jr.data){
+        // No answer for this project. That means "deleted" (or no longer yours)
+        // only while someone is signed in - so make sure of that before clearing anything.
+        return itc.sb.auth.getSession().then(function(sr){
+          if (sr && sr.data && sr.data.session && projectId === itc.projectId) itProjectGone();
+          return null;
+        }, function(){ return null; });
+      }
       itc.projectName = jr.data.name || itc.projectName;
       itMergeRemoteMeta(jr.data.meta);
-      return Promise.all([itFetchAllItems(projectId), itFetchAllCable(projectId)]);
+      return Promise.all([itFetchAllItems(projectId), itFetchAllCable(projectId)]).then(function(lists){
+        // Lists that come back after the sign-in was taken away are empty, not
+        // the truth. Merging them would mark everything on this device as
+        // "never sent" - and it would later be sent over other people's work.
+        return itc.sb.auth.getSession().then(function(sr){ return sr && sr.data && sr.data.session ? lists : null; }, function(){ return null; });
+      });
     }).then(function(res){
-      if (!res || projectId !== itc.projectId) return;
+      if (!res || projectId !== itc.projectId || itc.leaving) return;
       // A change was sent while this was loading, so what just arrived may
       // be from before it - applying it would put the old value back on
       // screen. Load again instead.
@@ -5100,7 +5139,8 @@
   // isn't an option: the end of a load itself, switching project, the page
   // being hidden/closed).
   function itPushNow(force){
-    if (!itc.projectId || !itc.sb) return Promise.resolve();
+    if (!itc.projectId || !itc.sb || itc.leaving) return Promise.resolve();
+    if (!itHasStoredSignIn()){ itNoSignIn(); return Promise.resolve(); }
     // view-only accounts never write (the database would refuse it anyway)
     if (itc.readOnly || itc.role === "viewer" || itc.role === "pc"){ itIsDirty = false; itStatusOk(); return Promise.resolve(); }
     // A load is running: let it finish first. It merges what other people
@@ -5171,6 +5211,7 @@
         itc.projectName = state.projectName || itc.projectName || "Untitled project";
         return sb.from("it_projects").update({name: itc.projectName, meta: metaCopy, updated_by: itc.clientId}).eq("id", projectId).then(function(r){
           if (r.error) throw r.error;
+          if (itc.leaving || !itHasStoredSignIn()){ var metaGone = new Error("the sign-in ended while this was being saved"); metaGone.noSignIn = true; throw metaGone; }
           itc.metaBase = metaCopy;
         });
       });
@@ -5178,13 +5219,16 @@
     return chain.then(function(){
       itc.pushSeq += 1;
       if (projectId !== itc.projectId) return;
+      if (itc.leaving || !itHasStoredSignIn()){ var sentGone = new Error("the sign-in ended while this was being saved"); sentGone.noSignIn = true; throw sentGone; }
       sentItems.forEach(function(v, id){ if (state.items[id]) itc.syncedItems.set(id, v); });
       itemDeletes.forEach(function(id){ if (!state.items[id]) itc.syncedItems.delete(id); });
       sentCable.forEach(function(v, roomKey){ itc.syncedCable.set(roomKey, v); });
       itWriteCache();
       itIsDirty = false;
+      itClearUnsentMark(projectId);
       itStatusOk();
     }).catch(function(e){
+      if (e && e.noSignIn){ if (!itc.leaving) itNoSignIn(); return; }
       if (itIsNetworkProblem(e)) itStatusOffline();
       // 42P10 = the items table isn't keyed by project + id yet
       else if (e && e.code === "42P10") itStatus("bad", "Not saved yet — run fix-it-items-shared-ids.sql in Supabase (will retry)");
@@ -5240,6 +5284,8 @@
     itSchedulePush();
   }
   function itProjectGone(){
+    if (itc.leaving) return;
+    itClearUnsentMark(itc.projectId);
     itCloseChannel();
     var id = itc.projectId;
     itc.projectId = null;
@@ -5314,7 +5360,423 @@
     return itPullAll();
   }
 
+  var IT_SW_CACHE = "install-tracker-v28";   // the same name as CACHE in sw.js
+  // ---------- a fresh sign-in every day ----------
+  // Everyone except a Dashboard login is signed out once the date has changed
+  // since they signed in, and the page then reloads - so every screen starts
+  // the day on the current build. The Equipment Database, the Install Tracker,
+  // the Field Engineering Tracker and the Apps page all carry this same block,
+  // because one sign-in covers them all: whichever page notices first does the
+  // signing out, and the others see it and reload.
+  //   - It waits for a quiet moment: nobody has touched any of the pages for a
+  //     few minutes, no window is open with something half filled in, the
+  //     device is online, and this page has nothing unsaved. The other open
+  //     pages are told first and given a moment to send their own work.
+  //     A tablet that was asleep at midnight is signed out when it wakes.
+  //   - A Dashboard login stays signed in. Its screen looks for a newer build
+  //     every few minutes instead, and reloads itself when there is one.
+  // app = {name, swCache, sb(), signedIn(), flush() -> promise of true when
+  //        nothing is left unsaved, beforeReload(), and optionally:
+  //        unsent() -> true while something hasn't been saved,
+  //        busy() -> true while a window is open that someone may be filling in,
+  //        beforeSignOut() -> called just before the sign-in is taken away}
+  function makeDayRule(app){
+    var DAY = "mkapps.signInDay", ACTIVE = "mkapps.lastActive", OUT = "mkapps.dayOut", SEEN = "mkapps.buildSeen." + app.name;
+    var ENDING = "mkapps.dayEnding", HOLD = "mkapps.dayHold.";
+    var QUIET_MS = 3 * 60000, TICK_MS = 30000, BUILD_MS = 10 * 60000, BUILD_AGAIN_MS = 45 * 60000, MAX_TRIES = 5;
+    var WAKE_MS = 2 * 60000;        // for this long after the new day is first seen, "nobody was working then" still decides it
+    var BUSY_MS = 30 * 60000;       // an open window holds the sign-out back only while it was touched this recently
+    var TOLD_MS = 2500, HOLD_MS = 20000;   // the other pages get this long to answer, and at most this long to send their work
+    var ending = false;    // this page is in the middle of ending the day (sending its work, or signing out)
+    var leaving = false;   // ...and the sign-in is going or gone: nothing more to do here but reload
+    var tries = 0, lastTry = 0, exempt = null, lastTouch = 0, lastBuild = Date.now(), verifying = false;
+    var noticedAt = 0, wasQuiet = false;
+    var me = Math.random().toString(36).slice(2, 10);
+    function get(k){ try{ return window.localStorage.getItem(k); }catch(e){ return null; } }
+    function set(k, v){ try{ window.localStorage.setItem(k, v); }catch(e){} }
+    function del(k){ try{ window.localStorage.removeItem(k); }catch(e){} }
+    function today(){
+      var d = new Date(), p = function(n){ return (n < 10 ? "0" : "") + n; };
+      return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+    }
+    // {d: the day this sign-in was made, s: which sign-in, x: 1 for a Dashboard login}
+    function stamp(){
+      try{ var o = JSON.parse(get(DAY) || "null"); return o && typeof o === "object" && o.d ? o : null; }catch(e){ return null; }
+    }
+    // Which sign-in this is: the session's own id, which stays the same for as
+    // long as the sign-in is kept alive and is new after every fresh sign-in.
+    function keyOf(session){
+      var id = "";
+      try{
+        var part = String(session.access_token || "").split(".")[1] || "";
+        id = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/"))).session_id || "";
+      }catch(e){}
+      return String(id || ("u:" + ((session.user && session.user.id) || "")));
+    }
+    function lastActive(){ return Number(get(ACTIVE)) || 0; }
+    function quiet(){
+      return navigator.onLine !== false && Date.now() - lastActive() >= QUIET_MS;
+    }
+    // A page is about to carry on with this sign-in (fresh = the password was
+    // just typed). False = it is from an earlier day: don't carry on, call
+    // endAtStart() and show the sign-in form.
+    function accept(session, fresh){
+      var st = stamp(), key = keyOf(session);
+      ending = false; leaving = false; tries = 0; exempt = null; noticedAt = 0;
+      if (fresh || !st || st.s !== key){
+        set(DAY, JSON.stringify({d: today(), s: key}));
+        if (fresh) del(OUT);
+        return true;
+      }
+      return st.d === today() || !!st.x || !quiet();
+    }
+    // Ends the sign-in on this device. Signing out needs the server to answer;
+    // if it doesn't, what the browser keeps of the sign-in is removed anyway.
+    function signOutHere(){
+      return new Promise(function(resolve){
+        var done = false;
+        var finish = function(){
+          if (done) return;
+          done = true;
+          try{
+            var keys = [];
+            for (var i = 0; i < window.localStorage.length; i++){
+              var k = window.localStorage.key(i);
+              if (k && /^sb-.+-auth-token(-code-verifier)?$/.test(k)) keys.push(k);
+            }
+            keys.forEach(del);
+          }catch(e){}
+          resolve();
+        };
+        setTimeout(finish, 8000);
+        try{
+          var sb = app.sb();
+          // "local": this browser only - the same login on another device ends its own day
+          Promise.resolve(sb ? sb.auth.signOut({scope: "local"}) : null).then(finish, finish);
+        }catch(e){ finish(); }
+      });
+    }
+    function reload(){
+      try{ app.beforeReload(); }catch(e){}
+      try{ window.location.reload(); }catch(e){}
+    }
+    // the sign-in is gone (or going): keep what is on this device and start again clean
+    function leave(){
+      leaving = true; ending = true;
+      reload();
+    }
+    function endAtStart(){
+      ending = true; leaving = true;
+      set(OUT, today());
+      // (the stamp stays until the sign-in is really gone, so another page that
+      // is starting up at the same moment still sees it as yesterday's)
+      return signOutHere().then(function(){ del(DAY); ending = false; leaving = false; });
+    }
+    // send what this page hasn't saved yet - and don't wait on it for ever
+    function flushOwn(){
+      return new Promise(function(resolve){
+        var timer = setTimeout(function(){ resolve(false); }, 20000);
+        Promise.resolve().then(function(){ return app.flush(); }).then(function(clean){ clearTimeout(timer); resolve(!!clean); }, function(){ clearTimeout(timer); resolve(false); });
+      });
+    }
+    // Is another page still sending its work? (marks older than the limit are leftovers)
+    function othersHolding(){
+      var now = Date.now(), any = false;
+      try{
+        for (var i = window.localStorage.length - 1; i >= 0; i--){
+          var k = window.localStorage.key(i);
+          if (!k || k.indexOf(HOLD) !== 0 || k === HOLD + me) continue;
+          var age = now - (Number(get(k)) || 0);
+          if (age < HOLD_MS) any = true; else if (age > 3600000) del(k);
+        }
+      }catch(e){}
+      return any;
+    }
+    // Tell the other pages the day is about to end, and give any of them that
+    // still has work to send a moment to send it while the sign-in is there.
+    function tellOthers(){
+      set(ENDING, me + ":" + Date.now());
+      return new Promise(function(resolve){
+        var began = Date.now();
+        (function look(){
+          var waited = Date.now() - began;
+          if (leaving || (waited >= TOLD_MS && (waited >= HOLD_MS || !othersHolding()))){ resolve(); return; }
+          setTimeout(look, 500);
+        })();
+      });
+    }
+    // ...and the other side of that: another page is about to end the day.
+    function helpOut(){
+      if (ending || leaving || !app.signedIn()) return;
+      set(HOLD + me, String(Date.now()));
+      var done = function(){ del(HOLD + me); };
+      try{ Promise.resolve(app.flush()).then(done, done); }catch(e){ done(); }
+    }
+    // Can the site really be reached? (Wi-Fi with no internet behind it says
+    // "online" too. Signing out then would leave the person on a sign-in
+    // form they can't use, and a reload couldn't fetch a newer build anyway.)
+    function reachable(){
+      return new Promise(function(resolve){
+        var timer = setTimeout(function(){ resolve(false); }, 8000);
+        try{
+          fetch(String(window.location.href).split("#")[0], {method: "HEAD", cache: "no-store"}).then(function(r){ clearTimeout(timer); resolve(!!(r && r.ok)); }, function(){ clearTimeout(timer); resolve(false); });
+        }catch(e){ clearTimeout(timer); resolve(false); }
+      });
+    }
+    function end(){
+      ending = true;
+      reachable().then(function(ok){
+        if (leaving) return null;
+        if (!ok){ ending = false; return null; }   // as good as offline: wait, and don't count it as a try
+        return flushOwn();
+      }).then(function(clean){
+        if (clean === null || leaving) return;     // (leaving: signed out from elsewhere meanwhile, already reloading)
+        var st = stamp();
+        if (!st){ leave(); return; }               // another page has ended the day meanwhile: start clean like the rest
+        if (st.d === today() || st.x){ ending = false; return; }
+        // Something here still can't be saved: try again at the next look. After
+        // a few goes it is left on this device (it is sent the next time its job
+        // is opened) rather than keeping yesterday's sign-in for ever.
+        if (!clean && tries < MAX_TRIES){ tries++; ending = false; return; }
+        return tellOthers().then(function(){
+          if (leaving) return;
+          var now = stamp();
+          if (!now){ leave(); return; }
+          if (now.d === today() || now.x){ ending = false; return; }
+          leaving = true;
+          try{ if (app.beforeSignOut) app.beforeSignOut(); }catch(e){}
+          set(OUT, today());
+          // (the stamp stays until the sign-in is really gone, so a page starting up
+          // at this very moment still sees it as yesterday's and doesn't carry on with it)
+          return signOutHere().then(function(){ del(DAY); del(ENDING); reload(); });
+        });
+      });
+    }
+    // A Dashboard screen: reload when the site has a newer build than this page.
+    function buildCheck(){
+      var now = Date.now();
+      if (!app.swCache || navigator.onLine === false || now - lastBuild < BUILD_MS) return;
+      lastBuild = now;
+      try{
+        fetch("sw.js", {cache: "no-store"}).then(function(r){ return r.ok ? r.text() : ""; }).then(function(text){
+          var m = /CACHE\s*=\s*["']([^"']+)["']/.exec(text || "");
+          if (!m || m[1] === app.swCache) return;
+          // Once per build - and once more every 45 minutes if the reload came
+          // back as the old page (the files were uploaded a minute apart, or the
+          // connection dropped for a moment). A half-finished upload can't make
+          // the screen reload over and over.
+          var seen = null;
+          try{ seen = JSON.parse(get(SEEN) || "null"); }catch(e){}
+          if (seen && seen.b === m[1] && Date.now() - (Number(seen.t) || 0) < BUILD_AGAIN_MS) return;
+          // someone is using this screen, or it has work to send: leave it for the next look
+          if (Date.now() - lastActive() < QUIET_MS || (app.unsent && app.unsent())) return;
+          // the page itself must be the new one too (the two files can arrive a minute apart)
+          return fetch(String(window.location.href).split("#")[0], {cache: "no-store"}).then(function(r){ return r.ok ? r.text() : ""; }).then(function(page){
+            if (String(page || "").indexOf('"' + m[1] + '"') === -1) return;
+            set(SEEN, JSON.stringify({b: m[1], t: Date.now()}));
+            reload();
+          });
+        }).then(null, function(){});
+      }catch(e){}
+    }
+    // The sign-in went while this page wasn't looking (nothing told it): reload.
+    // (Also what a page calls - as day.recheck() - when it finds for itself that
+    // nobody seems to be signed in any more.)
+    function verify(){
+      if (verifying || navigator.onLine === false) return;
+      var sb = app.sb();
+      if (!sb) return;
+      verifying = true;
+      sb.auth.getSession().then(function(r){
+        verifying = false;
+        var session = r && r.data && r.data.session;
+        if (session && session.user){ if (!stamp()) set(DAY, JSON.stringify({d: today(), s: keyOf(session)})); return; }
+        if (r && r.error) return;   // couldn't tell
+        if (app.signedIn() && !ending && navigator.onLine !== false) leave();
+      }, function(){ verifying = false; });
+    }
+    function check(){
+      if (ending || !app.signedIn()) return;
+      var st = stamp();
+      if (!st){ verify(); return; }
+      if (exempt === null ? st.x : exempt){
+        if (st.d !== today()){ st.d = today(); set(DAY, JSON.stringify(st)); }
+        buildCheck();
+        return;
+      }
+      var now = Date.now();
+      if (st.d === today()){ noticedAt = 0; return; }
+      // The new day, seen for the first time on this page: was anyone working just then?
+      if (!noticedAt){ noticedAt = now; wasQuiet = now - lastActive() >= QUIET_MS; }
+      if (navigator.onLine === false) return;
+      // Nobody was working when the day turned (a tablet waking up): end it now,
+      // even if the screen has been touched since - a wake-up tap, or a few taps
+      // while the Wi-Fi came back. That only holds for the first couple of
+      // minutes; after that, or if someone was working across midnight, it
+      // waits for a pause in the work.
+      if (!(wasQuiet && now - noticedAt <= WAKE_MS) && now - lastActive() < QUIET_MS) return;
+      // a window is open on this page and was touched not long ago (a form half filled in, a slip being signed)
+      try{ if (app.busy && app.busy() && now - lastActive() < BUSY_MS) return; }catch(e){}
+      if (now - lastTry < TICK_MS) return;   // one go per look, however often the screen is touched
+      lastTry = now;
+      end();
+    }
+    // What this login is, once the page knows: true = a Dashboard login,
+    // false = anyone else, null = couldn't find out (keep what was known).
+    function role(isDashboard){
+      if (isDashboard !== null && isDashboard !== undefined){
+        exempt = !!isDashboard;
+        var st = stamp();
+        if (st && !!st.x !== exempt){
+          if (exempt) st.x = 1; else delete st.x;
+          set(DAY, JSON.stringify(st));
+        }
+      }
+      check();
+    }
+    // Signed out somewhere else (another page or tab did it): start again clean.
+    // (If this page is the one doing the signing out, its own steps finish the job.)
+    function signedOut(){
+      if (leaving) return;
+      leave();
+    }
+    // The page's own Sign out button is doing the signing out.
+    function forget(){ ending = true; leaving = true; del(DAY); }
+    function note(){
+      return get(OUT) === today() ? "It's a new day, so everyone was signed out. Sign in again to carry on." : "";
+    }
+    function touch(){
+      var now = Date.now();
+      if (now - lastTouch < 15000) return;
+      // the day's first touch is judged on what came before it
+      check();
+      if (leaving) return;
+      lastTouch = now;
+      set(ACTIVE, String(now));
+    }
+    function start(){
+      setInterval(check, TICK_MS);
+      document.addEventListener("visibilitychange", function(){ if (!document.hidden) check(); });
+      window.addEventListener("focus", check);
+      window.addEventListener("online", check);
+      window.addEventListener("pageshow", check);
+      window.addEventListener("pagehide", function(){ del(HOLD + me); });
+      window.addEventListener("storage", function(ev){ if (ev && ev.key === ENDING && ev.newValue) helpOut(); });
+      ["pointerdown", "keydown", "input"].forEach(function(t){ document.addEventListener(t, touch, true); });
+    }
+    return {accept: accept, endAtStart: endAtStart, role: role, check: check, recheck: verify, signedOut: signedOut, forget: forget, note: note, start: start};
+  }
+  // Sends what hasn't reached the database yet. True once nothing is left unsent.
+  function itDayFlush(){
+    if (!itc.on || !itc.sb || itc.leaving) return Promise.resolve(true);
+    // The queued "status changed" e-mail goes while the sign-in is still good.
+    // It is sent alongside the save, never ahead of it: the save decides
+    // whether this page is done, and the e-mail gets a few seconds at most.
+    var mail = Promise.race([
+      Promise.resolve().then(function(){ return itFlushStatusBatch(); }).then(null, function(){}),
+      new Promise(function(resolve){ setTimeout(resolve, 4000); })
+    ]);
+    if (!itc.projectId) return mail.then(function(){ return true; });
+    clearTimeout(itc.pushTimer);
+    itWriteCache();
+    var goes = 0;
+    // let a load or a save that is already running finish
+    function settle(){
+      if (!(itc.pulling || itc.pushing) || !itc.projectId || itc.leaving || ++goes > 40) return Promise.resolve();
+      return new Promise(function(resolve){ setTimeout(resolve, 500); }).then(settle);
+    }
+    // Something here isn't sent yet: read the project first. That merges what
+    // other people changed into this device's copy, and ends by sending it -
+    // sending first would put this device's older values over theirs.
+    function mergeFirst(){
+      return itIsDirty && itc.projectId && !itc.leaving ? Promise.resolve(itPullAll()).then(settle) : null;
+    }
+    function go(){
+      if (!itc.projectId || itc.leaving) return Promise.resolve(true);
+      // A load is running (the page has just woken up): let it finish first. It
+      // merges what other people changed into this device's copy and then
+      // sends - sending first would put this device's older values over theirs.
+      if (itc.pulling && Date.now() - itc.pullStarted < 15000){
+        if (++goes > 40) return Promise.resolve(false);
+        return new Promise(function(resolve){ setTimeout(resolve, 500); }).then(go);
+      }
+      return Promise.resolve(itPushNow(true)).then(function(){
+        if (!itc.pushing && !itc.pushAgain && !itc.pulling) return !itIsDirty;
+        // a save or a load was already on its way: let it land, then send what is left
+        if (++goes > 40) return false;
+        return new Promise(function(resolve){ setTimeout(resolve, 500); }).then(go);
+      });
+    }
+    var saved = settle().then(mergeFirst).then(go);
+    return Promise.all([saved, mail]).then(function(done){ return done[0]; });
+  }
+  // A project with changes that hadn't been sent when the page last reloaded
+  // is remembered on the device: the next sign-in opens it first (so they are
+  // merged and sent), and Sign out asks before clearing them.
+  function itUnsentMark(){
+    try{ var m = JSON.parse(itLsGet(ITK.unsent) || "null"); return m && m.id ? m : null; }catch(e){ return null; }
+  }
+  function itClearUnsentMark(projectId){
+    var m = itUnsentMark();
+    if (m && (!projectId || m.id === projectId)) itLsDel(ITK.unsent);
+  }
+  // The sign-in is about to go, or has gone. What couldn't be sent is kept in
+  // this device's copy of the project; then the project is let go of, so that
+  // answers still on their way are dropped. (Without a sign-in the database
+  // answers every read with "nothing", which must never be merged in.)
+  function itDayLeave(){
+    clearTimeout(itc.pushTimer); clearTimeout(itc.retryTimer); clearTimeout(itc.applyTimer);
+    if (itc.projectId){
+      itWriteCache();
+      if (itIsDirty) itLsSet(ITK.unsent, JSON.stringify({id: itc.projectId, name: itc.projectName || ""}));
+    }
+    itc.leaving = true;
+    itCloseChannel();
+    itc.projectId = null;
+    itIsDirty = false; state.dirty = false;   // or the browser would stop the reload to ask "leave site?"
+  }
+  var itDay = makeDayRule({
+    name: "install", swCache: IT_SW_CACHE,
+    sb: function(){ return itc.sb; },
+    signedIn: function(){ return !!(itc.on && itc.user); },
+    flush: itDayFlush,
+    unsent: function(){ return !!(itc.projectId && itIsDirty); },
+    // a window with something being filled in (the dashboard and the project list are not that)
+    busy: function(){
+      if (document.querySelector("dialog[open]")) return true;
+      var open = document.querySelectorAll(".it-modal-backdrop:not([hidden])");
+      for (var i = 0; i < open.length; i++){
+        if (open[i].id !== "itDashboardBackdrop" && open[i].id !== "itProjectsBackdrop") return true;
+      }
+      return false;
+    },
+    beforeSignOut: itDayLeave,
+    beforeReload: itDayLeave
+  });
+  // The Equipment Database keeps its own list of who is what: a login that is
+  // a Dashboard there is left signed in by the daily sign-out, like one here.
+  // role = this login's type here, or null when it couldn't be read.
+  function itDayRoleLookup(role){
+    if (role === "dashboard"){ itDay.role(true); return; }
+    Promise.resolve().then(function(){ return itc.sb.from("eq_profiles").select("role").eq("id", itc.user.id).maybeSingle(); }).then(function(r){
+      itDay.role(role === null || !r || r.error ? null : (r.data && r.data.role) === "dashboard");
+    }, function(){ itDay.role(null); });
+  }
+
   // ----- sign in -----
+  // Signed in somewhere else on the site (the Equipment Database, the Field
+  // Engineering Tracker, another tab) while this page was sitting on its
+  // sign-in form: carry on as that person, no second sign-in needed. Does
+  // nothing when this page is already signed in, or is in the middle of its
+  // own sign-in (the form's own handler finishes that).
+  function itPickUpSignIn(){
+    // (not while the page is still starting up: that has its own look at the stored sign-in, and decides)
+    if (!itc.sb || itc.user || itc.signingIn || itc.starting || itEl("itLogin").hidden) return;
+    itc.sb.auth.getSession().then(function(r){
+      var session = r && r.data && r.data.session;
+      if (session && session.user && !itc.user && !itc.signingIn && itDay.accept(session)) itAfterSignIn(session.user);
+    }, function(){});
+  }
   function itShowLogin(message){
     itEl("itLogin").hidden = false;
     itEl("itLoginSub").textContent = message || "Sign in to continue";
@@ -5744,8 +6206,20 @@
     itEl("itFindBtn").addEventListener("click", itCrossProjectSearch);
     findInput.addEventListener("keydown", function(ev){ if (ev.key === "Enter"){ ev.preventDefault(); itCrossProjectSearch(); } });
     itEl("itSignOutBtn").addEventListener("click", function(){
-      if (itIsDirty && !confirm("Some changes haven't synced yet. Sign out anyway?")) return;
+      if (itIsDirty){
+        if (!confirm("Some changes haven't synced yet. Sign out anyway?")) return;
+      } else {
+        // changes left in a project's copy on this device (the page reloaded before they could be sent) would be cleared with it
+        var waiting = itUnsentMark();
+        if (waiting && !confirm("Changes made on this device" + (waiting.name ? " to " + waiting.name : "") + " haven't reached the database yet.\n\nSigning out here discards them. To keep them: Cancel, open that project with a connection, and wait for it to say it is synced.\n\nSign out anyway?")) return;
+      }
       itIsDirty = false;
+      state.dirty = false;   // signing out reloads the page; this stops the browser asking "leave site?" on top
+      itDay.forget();        // this button is doing the signing out
+      // nothing that is still on its way from the database is taken in from here on
+      clearTimeout(itc.pushTimer); clearTimeout(itc.retryTimer); clearTimeout(itc.applyTimer);
+      itc.leaving = true;
+      itc.projectId = null;
       itCloseChannel();
       var done = function(){ itClearCaches(); location.reload(); };
       itc.sb.auth.signOut().then(done, done);
@@ -5756,17 +6230,21 @@
       ev.preventDefault();
       errEl.textContent = "";
       btn.disabled = true; btn.textContent = "Signing in...";
+      itc.signingIn = true;   // this form is doing the signing in: itPickUpSignIn stays out of it
       itc.sb.auth.signInWithPassword({email: itEl("itEmail").value.trim(), password: itEl("itPass").value}).then(function(r){
         btn.disabled = false; btn.textContent = "Sign in";
+        itc.signingIn = false;
         if (r.error){
           errEl.textContent = /invalid/i.test(r.error.message) ? "Wrong email or password." : r.error.message;
           itEl("itPass").select();
           return;
         }
         itEl("itPass").value = "";
+        if (r.data.session) itDay.accept(r.data.session, true);
         return itAfterSignIn(r.data.user);
       }).catch(function(e){
         btn.disabled = false; btn.textContent = "Sign in";
+        itc.signingIn = false;
         errEl.textContent = itIsNetworkProblem(e) ? "You're offline. Sign in once with internet." : "Couldn't sign in: " + (e && e.message ? e.message : e);
       });
     });
@@ -5854,15 +6332,34 @@
       });
       itWireUi();
       itc.sb.auth.onAuthStateChange(function(evt){
-        if (evt === "SIGNED_OUT" && itc.user){
-          itCloseChannel(); itc.user = null; itc.projectId = null;
-          itShowLogin("You were signed out. Sign in again.");
-        }
+        // Signed out somewhere else on the site, or by the new day: start again
+        // clean. (What hasn't been sent stays in this device's copy of the project.)
+        if (evt === "SIGNED_OUT" && itc.user) itDay.signedOut();
+        if (evt === "SIGNED_IN") itPickUpSignIn();
       });
+      // The same sign-in is shared by the Equipment Database and the Field
+      // Engineering Tracker (same site, same project). Its arrival in this
+      // browser's storage is the other way this page hears that someone has
+      // just signed in on one of those, or in another tab.
+      window.addEventListener("storage", function(ev){
+        if (!ev.key || !/^sb-.+-auth-token$/.test(ev.key)) return;
+        if (ev.newValue) itPickUpSignIn(); else if (itc.user) itDay.signedOut();
+      });
+      itDay.start();
+      itc.starting = true;   // until the stored sign-in has been looked at and decided on, just below
       return itc.sb.auth.getSession();
     }).then(function(r){
       var session = r && r.data && r.data.session;
-      if (session && session.user) return itAfterSignIn(session.user);
+      if (session && session.user){
+        // yesterday's sign-in: it ends here, before anything is shown
+        if (!itDay.accept(session)){
+          itEl("itLoginBtn").disabled = true;   // not until the old sign-in is fully gone
+          return itDay.endAtStart().then(function(){ itc.starting = false; itEl("itLoginBtn").disabled = false; itShowLogin(itDay.note()); itStatus("bad", "Signed out"); });
+        }
+        itc.starting = false;
+        return itAfterSignIn(session.user);
+      }
+      itc.starting = false;
       var saved = null;
       try{ saved = JSON.parse(itLsGet(ITK.user) || "null"); }catch(e){}
       if (navigator.onLine === false && saved){
@@ -5871,9 +6368,10 @@
         itEl("itLogin").hidden = true;
         return itShowProjects("You're offline — pick a project saved on this device.");
       }
-      itShowLogin("Sign in to continue");
+      itShowLogin(itDay.note() || "Sign in to continue");
       itStatus("bad", "Signed out");
     }).catch(function(e){
+      itc.starting = false;
       itShowLogin("Couldn't start sync: " + (e && e.message ? e.message : e));
     });
   }
@@ -5929,9 +6427,19 @@
   var itLegacyResume = itResume;
   function itRolesResume(){
     return itc.sb.from("it_profiles").select("role,project_id").eq("id", itc.user.id).maybeSingle().then(function(pr){
+      // Couldn't be read just now (a network blip as the page reloads): go by
+      // what this login was the last time it could be read on this device.
+      var roleKnown = !pr.error;
+      if (pr.error){
+        var kept = null;
+        try{ kept = JSON.parse(itLsGet(ITK.profile) || "null"); }catch(e){}
+        if (kept && kept.id === itc.user.id && kept.row){ pr = {data: kept.row, error: null}; roleKnown = true; }
+      } else if (pr.data) itLsSet(ITK.profile, JSON.stringify({id: itc.user.id, row: pr.data}));   // (only a real line: "nothing" is also what a read with no sign-in gets back)
+      else itLsDel(ITK.profile);
       var role = (pr.data && pr.data.role) || "staff";
       var projectId = pr.data && pr.data.project_id;
       itc.role = role;
+      itDayRoleLookup(roleKnown ? role : null);
 
       if (role === "dashboard"){
         // straight to the full dashboard - no project list, no project opening
@@ -5961,6 +6469,11 @@
         });
       }
       itApplyRoleUi("staff");
+      var leftBehind = itUnsentMark();
+      if (leftBehind && !/[?&]project=/.test(location.search)){
+        itStatus("busy", "Sending changes that were left on this device...");
+        return itOpenProject({id: leftBehind.id, name: leftBehind.name || ""});
+      }
       return itLegacyResume();
     }).catch(function(){
       // it_profiles missing/unreachable (e.g. offline, or the SQL migration
@@ -6628,7 +7141,12 @@
     });
   }
   var itDashboardBackdropEl = itEl("itDashboardBackdrop");
-  if (itDashboardBackdropEl) itDashboardBackdropEl.addEventListener("click", function(ev){ if (ev.target === itDashboardBackdropEl) itCloseDashboardModal(); });
+  if (itDashboardBackdropEl) itDashboardBackdropEl.addEventListener("click", function(ev){
+    if (ev.target !== itDashboardBackdropEl) return;
+    // a Dashboard login has nothing behind its dashboard: closing it would leave a blank screen
+    if (document.body.classList.contains("it-role-dashboard")) return;
+    itCloseDashboardModal();
+  });
 
   boot();
   itCloudBoot();

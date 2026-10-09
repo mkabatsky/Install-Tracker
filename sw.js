@@ -1,6 +1,6 @@
 // Service worker: lets the app open offline and pick up new versions when online.
 // Bump CACHE (v1 -> v2 ...) whenever you upload a new index.html so phones refresh.
-var CACHE = "install-tracker-v27";
+var CACHE = "install-tracker-v28";
 var CORE = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png"];
 // only these outside sites are ever cached; the database (supabase.co) must never be
 var CACHEABLE_HOSTS = ["cdn.jsdelivr.net", "cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com"];
@@ -12,7 +12,8 @@ self.addEventListener("install", function(e){
 self.addEventListener("activate", function(e){
   e.waitUntil(
     caches.keys().then(function(keys){
-      return Promise.all(keys.filter(function(k){ return k !== CACHE; }).map(function(k){ return caches.delete(k); }));
+      // only this app's own older caches: the other apps on the same address keep theirs
+      return Promise.all(keys.filter(function(k){ return k.indexOf("install-tracker-") === 0 && k !== CACHE; }).map(function(k){ return caches.delete(k); }));
     }).then(function(){ return self.clients.claim(); })
   );
 });
